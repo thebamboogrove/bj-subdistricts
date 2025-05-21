@@ -142,9 +142,64 @@
       "file": "./src/boundaries/dongcheng/dongcheng-outline.geojson",
       "styleRef": "districtStyle"
     },
-
+    {
+      "file": "./src/boundaries/xicheng/xicheng-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/chaoyang/chaoyang-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/fengtai/fengtai-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/shijingshan/shijingshan-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/haidian/haidian-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/mentougou/mentougou-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/fangshan/fangshan-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/tongzhou/tongzhou-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/shunyi/shunyi-outline.geojson",
+      "styleRef": "districtStyle"
+    },
     {
       "file": "./src/boundaries/changping/changping-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/yanqing/yanqing-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/miyun/miyun-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/pinggu/pinggu-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/huairou/huairou-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/daxing/daxing-outline.geojson",
       "styleRef": "districtStyle"
     },
     {

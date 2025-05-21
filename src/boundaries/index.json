@@ -41,8 +41,8 @@
     "districtStyle": {
       "default": {
         "fillOpacity": 0,
-        "weight": 2,
-        "color": "rgba(30, 20, 20, 1)"
+        "weight": 3,
+        "color": "rgba(40, 30, 30, 1)"
       },
       "labelConfig": {
         "property": "Name",
@@ -58,7 +58,7 @@
       "default": {
         "fillOpacity": 0,
         "weight": 5,
-        "color": "rgba(25,25,0,0.65)"
+        "color": "rgba(110, 90, 60, 0.3)"
       },
       "popupFilter": false,
       "interactive": false

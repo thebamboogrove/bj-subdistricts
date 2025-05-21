@@ -1,0 +1,155 @@
+{
+  "styles": {
+    "subdistrictStyle": {
+      "default": {
+        "fillOpacity": 0.2,
+        "weight": 1,
+        "color": "rgba(70, 70, 70, 0.6)"
+      },
+      "labelConfig": {
+        "property": "Name",
+        "minZoom": 14,
+        "maxZoom": 18,
+        "fontSize": "16pt"
+      },
+      "styleMap": {
+        "map": {
+          "1": {
+            "fillColor": "#e41e32"
+          },
+          "2": {
+            "fillColor": "#ff782a"
+          },
+          "3": {
+            "fillColor": "#e2cf04"
+          },
+          "4": {
+            "fillColor": "#98c217"
+          },
+          "5": {
+            "fillColor": "#3f64ce"
+          },
+          "6": {
+            "fillColor": "#7e2b8e"
+          }
+        },
+        "property": "color_id"
+      },
+      "popupFilter": true,
+      "interactive": true
+    },
+    "districtStyle": {
+      "default": {
+        "fillOpacity": 0,
+        "weight": 2,
+        "color": "rgba(30, 20, 20, 1)"
+      },
+      "labelConfig": {
+        "property": "Name",
+        "minZoom": 10,
+        "maxZoom": 14,
+        "fontSize": "18pt",
+        "fontWeight": "500"
+      },
+      "popupFilter": false,
+      "interactive": false
+    },
+    "cityStyle": {
+      "default": {
+        "fillOpacity": 0,
+        "weight": 5,
+        "color": "rgba(25,25,0,0.65)"
+      },
+      "popupFilter": false,
+      "interactive": false
+    }
+  },
+  "layers": [
+    {
+      "file": "./src/boundaries/dongcheng/dongcheng-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/xicheng/xicheng-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/chaoyang/chaoyang-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/fengtai/fengtai-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/shijingshan/shijingshan-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/haidian/haidian-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/mentougou/mentougou-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/fangshan/fangshan-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/tongzhou/tongzhou-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/shunyi/shunyi-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/changping/changping-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/yanqing/yanqing-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/miyun/miyun-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/pinggu/pinggu-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/huairou/huairou-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/daxing/daxing-all.geojson",
+      "styleRef": "subdistrictStyle"
+    },
+    {
+      "file": "./src/boundaries/chaoyang/chaoyang-exclave-line.geojson",
+      "style": {
+        "color": "rgba(80, 20, 20, 1)",
+        "weight": 2,
+        "dashArray": "5, 5",
+        "dashOffset": "0"
+      }
+    },
+    {
+      "file": "./src/boundaries/dongcheng/dongcheng-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+
+    {
+      "file": "./src/boundaries/changping/changping-outline.geojson",
+      "styleRef": "districtStyle"
+    },
+    {
+      "file": "./src/boundaries/beijing-outline.geojson",
+      "styleRef": "cityStyle"
+    }
+  ]
+}

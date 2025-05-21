@@ -1,0 +1,43 @@
+body {
+    font-family: "Noto Sans SC", sans-serif;
+    font-style: normal;
+    font-optical-sizing: auto;
+    margin: 0;
+    padding: 0;
+}
+
+#map {
+    height: 100vh;
+    width: 100%;
+}
+
+.label-div {
+    white-space: nowrap;
+    transform: translate(-50%, -50%);
+    position: absolute;
+    text-shadow: 0pt 1pt 0pt rgba(255, 255, 255, 0.75), 0px 0.4em 0.35em rgba(0, 0, 0, 0.4);
+    -webkit-text-stroke: 1pt white;
+    paint-order: stroke fill;
+    letter-spacing: 2pt;
+}
+@font-face {
+    font-family: 'Noto Sans SC';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 400;
+    src: url(../../dist/fonts/noto-sans-sc-chinese-simplified-400-normal.woff2) format('woff2');
+}
+@font-face {
+    font-family: 'Noto Sans SC';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 500;
+    src: url(../../dist/fonts/noto-sans-sc-chinese-simplified-500-normal.woff2) format('woff2');
+}
+@font-face {
+    font-family: 'Noto Sans SC';
+    font-style: normal;
+    font-display: swap;
+    font-weight: 700;
+    src: url(../../dist/fonts/noto-sans-sc-chinese-simplified-700-normal.woff2) format('woff2');
+}

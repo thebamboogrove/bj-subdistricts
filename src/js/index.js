@@ -127,7 +127,7 @@ fetch('./src/boundaries/index.json')
                 li.innerHTML = `
             <div style="display:flex; flex-direction:column;">
                 <span>${nameMarked}</span>
-                <span style="font-size:smaller; color:#777;">${codeMarked}</span>
+                <span class="smaller">${codeMarked}</span>
             </div>
         `;
                 return li;

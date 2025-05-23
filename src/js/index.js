@@ -62,10 +62,10 @@ fetch('./src/boundaries/index.json')
                 const layer = L.geoJSON(data, {
                     style: styleFn,
                     onEachFeature: (feature, lyr) => {
-                        // search index
                         featureIndex.push({
                             name: feature.properties.Name,
                             code: feature.properties.code,
+                            pinyin: feature.properties.pinyin,
                             layer: lyr
                         });
                         if (interactiveFlag) {
@@ -107,32 +107,33 @@ fetch('./src/boundaries/index.json')
             map.options.minZoom = map.getZoom();
         }
         console.log(featureIndex)
-        // fuze magic
-        const fuse = new Fuse(featureIndex, {keys: ['name', 'code'], threshold: 0.6 });
+        const fuse = new Fuse(featureIndex, {keys: ['name', 'code', 'pinyin'], threshold: 0.8, distance: 10, minMatchCharLength: 1});
         const input = document.getElementById('search');
         const aw = new Awesomplete(input, {
             autoFirst: true,
             minChars: 1,
+            list: [],
+            filter: () => true,
             item: (text, input) => {
-                const match = text.match(/^(.+?) \((.+)\)$/);
-                const name = match ? match[1] : text;
+                const match = text.label.match(/^(.+?) \((.+)\)$/);
+                const name = match ? match[1] : text.label;
                 const code = match ? match[2] : '';
                 const query = input.trim();
-                const esc = query.replace(/[-\/\^$*+?.()|[\]{}]/g, '\$&');
+                const esc = query.replace(/[-\/$*+?.()|[\]{}]/g, '\$&');
                 const re = new RegExp(esc, 'gi');
                 const nameMarked = name.replace(re, m => `<mark>${m}</mark>`);
                 const codeMarked = code.replace(re, m => `<mark>${m}</mark>`);
                 const li = document.createElement('li');
                 li.innerHTML = `
-              <div style="display:flex; flex-direction:column;">
+            <div style="display:flex; flex-direction:column;">
                 <span>${nameMarked}</span>
                 <span style="font-size:smaller; color:#777;">${codeMarked}</span>
-              </div>
-            `;
+            </div>
+        `;
                 return li;
             },
-            replace: text => {
-                input.value = text;
+            replace: suggestion => {
+                input.value = suggestion.value;
             }
         });
         let lastHighlight = null;
@@ -148,16 +149,55 @@ fetch('./src/boundaries/index.json')
         });
         input.addEventListener('input', () => {
             if (!input.classList.contains('expanded')) input.classList.add('expanded');
+            const raw = input.value.trim();
             let results;
-            results = fuse.search(input.value).map(r => `${r.item.name} (${r.item.code})`).slice(0, 10);
-            aw.list = results;
+            if (/^[a-zA-Z\s]+$/.test(raw)) {
+                const pinyinFuse = new Fuse(featureIndex, {
+                    keys: ['pinyin'],
+                    threshold: 0.2,
+                    distance: 5,
+                    includeScore: true,
+                    ignoreLocation: true,
+                    useExtendedSearch: true,
+                    minMatchCharLength: 2
+                });
+                const terms = raw.toLowerCase().split(/\s+/);
+                if (terms.length > 1) {
+                    const matchingItems = new Set();
+                    terms.forEach(term => {
+                        const termResults = pinyinFuse.search(term);
+                        termResults.forEach(result => {
+                            if (result.score < 0.6) {
+                                matchingItems.add(result.item);
+                            }
+                        });
+                    });
+                    results = Array.from(matchingItems).map(i => ({
+                        label: `${i.name} (${i.code})`,
+                        value: `${i.name} (${i.code})`
+                    }));
+                } else {
+                    results = pinyinFuse.search(raw)
+                        .filter(result => result.score < 0.6)
+                        .map(r => ({
+                            label: `${r.item.name} (${r.item.code})`,
+                            value: `${r.item.name} (${r.item.code})`
+                        }));
+                }
+            } else {
+                results = fuse.search(raw).map(r => ({
+                    label: `${r.item.name} (${r.item.code})`,
+                    value: `${r.item.name} (${r.item.code})`
+                }));
+            }
+            aw.list = results.slice(0, 10);
         });
-        const HIGHLIGHT_STYLE = { color: '#FFFF00', weight: 3 };
+        const HIGHLIGHT_STYLE = {color: '#FFFF00', weight: 3};
 
         const handleFeatureSelection = (selectedValue) => {
             const found = featureIndex.find(i => `${i.name} (${i.code})` === selectedValue);
             if (!found) return;
-            
+
             updateHighlight(found.layer);
             focusOnLayer(found.layer);
         };

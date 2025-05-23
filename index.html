@@ -6,14 +6,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="./dist/css/leaflet.css"/>
     <link rel="stylesheet" href="./dist/css/L.Control.Locate.min.css"/>
+    <link rel="stylesheet" href="./dist/css/awesomplete.css"/>
     <script src="./dist/js/leaflet.js"></script>
     <script src="./dist/js/L.Control.Locate.min.js"></script>
     <script src="https://cdn.maptiler.com/maptiler-sdk-js/v3.2.0/maptiler-sdk.umd.min.js"></script>
     <script src="https://cdn.maptiler.com/leaflet-maptilersdk/v4.0.2/leaflet-maptilersdk.umd.min.js"></script>
+    <script src="./dist/js/fuse.basic.min.js"></script>
+    <script src="./dist/js/awesomplete.min.js"></script>
     <link rel="stylesheet" href="./src/css/style.css">
 </head>
 <body>
-<div id="map"></div>
+<div id="map">
+    <div id="search-container" title="Search boundaries">
+        <label for="search"></label><input id="search" placeholder="" autocomplete="off">
+    </div>
+</div>
 <script src="./src/js/index.js"></script>
 </body>
 </html>

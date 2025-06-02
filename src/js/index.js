@@ -1,258 +1,577 @@
-const map = L.map('map').setView([0, 0], 2);
-L.maptiler.maptilerLayer({
-    style: `https://api.maptiler.com/maps/0196b3ae-e9c9-7d17-8eba-f7e3a737a043/style.json`,
-    apiKey: 'SZkfn0kRolWBGm2hTWcb'
-}).addTo(map);
-L.control.locate({position: 'topleft', setView: 'once', flyTo: true}).addTo(map);
-
-const allBounds = [];
-const labelMarkers = [];
-const geoJsonLayers = [];
-const featureIndex = [];
-
-function normalizeLabelPoint(p) {
-    if (Array.isArray(p) && p.length === 2) {
-        const [lng, lat] = p.map(Number);
-        if (isFinite(lat) && isFinite(lng)) return [lng, lat];
+// indexDB geojson cache
+class GeoJSONCache {
+    constructor() {
+        this.dbName = 'GeoJSONCache';
+        this.version = 100;
+        this.storeName = 'geojson';
+        this.db = null;
     }
-    return null;
+
+    async init() {
+        if (this.db) return;
+
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, this.version);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                this.db = request.result;
+                resolve();
+            };
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(this.storeName)) {
+                    db.createObjectStore(this.storeName, {keyPath: 'url'});
+                }
+            };
+        });
+    }
+
+    async get(url) {
+        await this.init();
+        return new Promise((resolve) => {
+            const tx = this.db.transaction([this.storeName], 'readonly');
+            const store = tx.objectStore(this.storeName);
+            const request = store.get(url);
+            request.onsuccess = () => {
+                const result = request.result;
+                // Simple 7-day expiry
+                if (result && Date.now() - result.timestamp < 7 * 24 * 60 * 60 * 1000) {
+                    resolve(result.data);
+                } else {
+                    resolve(null);
+                }
+            };
+            request.onerror = () => resolve(null);
+        });
+    }
+
+    async set(url, data) {
+        await this.init();
+        const tx = this.db.transaction([this.storeName], 'readwrite');
+        const store = tx.objectStore(this.storeName);
+        store.put({url, data, timestamp: Date.now()});
+    }
 }
 
-fetch('./src/boundaries/index.json')
-    .then(res => res.json())
-    .then(config => {
-        const styles = config.styles || {};
-        const entries = config.layers || [];
-        return Promise.all(entries.map(entry =>
-            fetch(entry.file).then(res => res.json()).then(data => {
-                const ref = entry.styleRef && styles[entry.styleRef] ? styles[entry.styleRef] : {};
-                const defaultStyle = ref.default || {};
-                const styleMapDef = ref.styleMap || entry.styleMap;
-                const popupToggle = ref.popupFilter != null ? ref.popupFilter : entry.popupFilter;
-                const interactiveFlag = ref.interactive != null ? ref.interactive : (entry.interactive != null ? entry.interactive : true);
-                const labelCfg = ref.labelConfig || entry.labelConfig;
-                const styleFn = feature => {
-                    const zoom = map.getZoom();
-                    let style = {...defaultStyle};
-                    if (styleMapDef && styleMapDef.property) {
-                        const v = feature.properties[styleMapDef.property];
-                        if (styleMapDef.map && String(v) in styleMapDef.map) {
-                            Object.assign(style, styleMapDef.map[String(v)]);
-                        }
-                    }
-                    if (entry.zoomStyles) {
-                        entry.zoomStyles.forEach(zs => {
-                            if ((zs.minZoom == null || zoom >= zs.minZoom) && (zs.maxZoom == null || zoom <= zs.maxZoom)) {
-                                Object.assign(style, zs.style);
-                            }
-                        });
-                    }
-                    if (entry.useFeatureProperties) {
-                        entry.useFeatureProperties.forEach(prop => {
-                            if (feature.properties[prop] != null) style[prop] = feature.properties[prop];
-                        });
-                    }
-                    if (!entry.styleRef && entry.style) {
-                        Object.assign(style, entry.style);
-                    }
-                    style.interactive = interactiveFlag;
-                    return style;
-                };
+// search control to map controls
+class SearchControl {
+    constructor() {
+        this._container = null;
+    }
 
-                const layer = L.geoJSON(data, {
-                    style: styleFn,
-                    onEachFeature: (feature, lyr) => {
-                        featureIndex.push({
-                            name: feature.properties.Name,
-                            code: feature.properties.code,
-                            pinyin: feature.properties.pinyin,
-                            layer: lyr
-                        });
-                        if (interactiveFlag) {
-                            if (popupToggle === true) lyr.bindPopup(feature.properties.Name);
-                        }
-                        if (labelCfg) {
-                            const coords = normalizeLabelPoint(feature.properties.labelPoint);
-                            if (coords) lyr.once('add', () => {
-                                const [lng, lat] = coords;
-                                const color = feature.properties[labelCfg.colorProp] || labelCfg.defaultColor;
-                                const size = labelCfg.fontSize || '14pt';
-                                const weight = labelCfg.fontWeight || '400';
-                                const html = `<div class='label-div' style='color:${color}; font-size:${size}; font-weight:${weight};'>${feature.properties[labelCfg.property]}</div>`;
-                                const m = L.marker([lng, lat], {
-                                    icon: L.divIcon({html, iconAnchor: [0, 0]}),
-                                    interactive: false
-                                }).addTo(map);
-                                labelMarkers.push({
-                                    marker: m,
-                                    minZoom: labelCfg.minZoom,
-                                    maxZoom: labelCfg.maxZoom || Infinity
-                                });
-                            });
-                        }
-                    }
-                }).addTo(map);
+    onAdd(map) {
+        this._map = map;
+        this._container = document.createElement('div');
+        this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+        this._container.id = 'search-container';
+        this._container.title = 'Search boundaries';
 
-                allBounds.push(layer.getBounds());
-                geoJsonLayers.push({layer, styleFn});
-            }).catch(err => console.error(`Error loading ${entry.file}:`, err))
-        ));
-    })
-    .then(() => {
-        const valid = allBounds.filter(b => b.isValid());
-        if (valid.length) {
-            const combined = valid.reduce((a, b) => a.extend(b), valid[0]);
-            map.fitBounds(combined);
-            map.setMaxBounds(combined);
-            map.options.minZoom = map.getZoom();
-        }
-        console.log(featureIndex)
-        const fuse = new Fuse(featureIndex, {keys: ['name', 'code', 'pinyin'], threshold: 0.8, distance: 10, minMatchCharLength: 1});
-        const input = document.getElementById('search');
-        const aw = new Awesomplete(input, {
-            autoFirst: true,
-            minChars: 1,
-            list: [],
-            filter: () => true,
-            item: (text, input) => {
-                const match = text.label.match(/^(.+?) \((.+)\)$/);
-                const name = match ? match[1] : text.label;
-                const code = match ? match[2] : '';
-                const query = input.trim();
-                const esc = query.replace(/[-\/$*+?.()|[\]{}]/g, '\$&');
-                const re = new RegExp(esc, 'gi');
-                const nameMarked = name.replace(re, m => `<mark>${m}</mark>`);
-                const codeMarked = code.replace(re, m => `<mark>${m}</mark>`);
-                const li = document.createElement('li');
-                li.innerHTML = `
-            <div style="display:flex; flex-direction:column;">
-                <span>${nameMarked}</span>
-                <span class="smaller">${codeMarked}</span>
+        const searchInput = document.createElement('input');
+        searchInput.id = 'search';
+        searchInput.placeholder = '';
+        searchInput.autocomplete = 'off';
+
+        this._container.appendChild(searchInput);
+
+        return this._container;
+    }
+
+    onRemove() {
+        this._container.parentNode.removeChild(this._container);
+        this._map = undefined;
+    }
+}
+
+// loading function
+class LoadingManager {
+    constructor() {
+        this.current = 0;
+        this.total = 0;
+        this.element = this.createUI();
+    }
+
+    createUI() {
+        const overlay = document.createElement('div');
+        overlay.id = 'loading-overlay';
+        overlay.innerHTML = `
+            <div class="loading-content">
+                <div class="loading-spinner"></div>
+                <div class="loading-header">Loading Map...</div>
+                <div class="loading-text">Initializing map</div>
+                <div class="progress-bar">
+                    <div class="progress-fill"></div>
+                </div>
             </div>
         `;
-                return li;
-            },
-            replace: suggestion => {
-                input.value = suggestion.value;
-            }
-        });
-        let lastHighlight = null;
-        input.addEventListener('focus', () => {
-            input.classList.add('expanded');
-            input.setAttribute('placeholder', 'Search boundaries by name or code...');
-        });
-        input.addEventListener('blur', () => {
-            if (!input.value) {
-                input.classList.remove('expanded');
-                input.removeAttribute('placeholder');
-            }
-        });
-        input.addEventListener('input', () => {
-            if (!input.classList.contains('expanded')) input.classList.add('expanded');
-            const raw = input.value.trim();
-            let results;
-            if (/^[a-zA-Z\s]+$/.test(raw)) {
-                const pinyinFuse = new Fuse(featureIndex, {
-                    keys: ['pinyin'],
-                    threshold: 0.2,
-                    distance: 5,
-                    includeScore: true,
-                    ignoreLocation: true,
-                    useExtendedSearch: true,
-                    minMatchCharLength: 2
-                });
-                const terms = raw.toLowerCase().split(/\s+/);
-                if (terms.length > 1) {
-                    const matchingItems = new Set();
-                    terms.forEach(term => {
-                        const termResults = pinyinFuse.search(term);
-                        termResults.forEach(result => {
-                            if (result.score < 0.6) {
-                                matchingItems.add(result.item);
-                            }
-                        });
-                    });
-                    results = Array.from(matchingItems).map(i => ({
-                        label: `${i.name} (${i.code})`,
-                        value: `${i.name} (${i.code})`
-                    }));
-                } else {
-                    results = pinyinFuse.search(raw)
-                        .filter(result => result.score < 0.6)
-                        .map(r => ({
-                            label: `${r.item.name} (${r.item.code})`,
-                            value: `${r.item.name} (${r.item.code})`
-                        }));
-                }
-            } else {
-                results = fuse.search(raw).map(r => ({
-                    label: `${r.item.name} (${r.item.code})`,
-                    value: `${r.item.name} (${r.item.code})`
-                }));
-            }
-            aw.list = results.slice(0, 10);
-        });
-        const HIGHLIGHT_STYLE = {color: '#FFFF00', weight: 3};
+        document.body.appendChild(overlay);
+        return overlay;
+    }
 
-        const handleFeatureSelection = (selectedValue) => {
-            const found = featureIndex.find(i => `${i.name} (${i.code})` === selectedValue);
-            if (!found) return;
+    setTotal(total) {
+        this.total = total;
+        this.current = 0;
+    }
 
-            updateHighlight(found.layer);
-            focusOnLayer(found.layer);
+    step(message) {
+        this.current++;
+        const progress = (this.current / this.total) * 100;
+        const fill = this.element.querySelector('.progress-fill');
+        const text = this.element.querySelector('.loading-text');
+
+        if (fill) fill.style.width = `${progress}%`;
+        if (text) text.textContent = message;
+    }
+
+    hide() {
+        if (this.element) {
+            this.element.style.opacity = '0';
+            setTimeout(() => this.element.remove(), 300);
+        }
+    }
+}
+
+// found features highlight
+class FeatureHighlighter {
+    constructor(map) {
+        this.map = map;
+        this.currentHighlight = null;
+    }
+
+    highlight(feature, type = 'subdistrict') {
+        this.clear();
+
+        const id = `highlight-${Date.now()}`;
+        const colors = {
+            district: {fill: '#ff6b35', stroke: '#ff4500'},
+            subdistrict: {fill: '#4ecdc4', stroke: '#26a69a'}
         };
+        const color = colors[type] || colors.subdistrict;
 
-        const updateHighlight = (layer) => {
-            if (lastHighlight) {
-                lastHighlight.setStyle(lastHighlight.options.style(lastHighlight.feature));
+        this.map.addSource(id, {
+            type: 'geojson',
+            data: {type: 'FeatureCollection', features: [feature]}
+        });
+
+        this.map.addLayer({
+            id: `${id}-fill`,
+            type: 'fill',
+            source: id,
+            paint: {
+                'fill-color': color.fill,
+                'fill-opacity': 0.6
             }
-            layer.setStyle(HIGHLIGHT_STYLE);
-            lastHighlight = layer;
-        };
+        });
 
-        const focusOnLayer = (layer) => {
-            map.fitBounds(layer.getBounds());
-            map.once('click', () => {
-                if (lastHighlight) {
-                    lastHighlight.setStyle(lastHighlight.options.style(lastHighlight.feature));
-                }
+        this.map.addLayer({
+            id: `${id}-stroke`,
+            type: 'line',
+            source: id,
+            paint: {
+                'line-color': color.stroke,
+                'line-width': 3
+            }
+        });
+
+        this.currentHighlight = id;
+
+        // instead of clear use animate?
+        setTimeout(() => this.clear(), 3000);
+    }
+
+    clear() {
+        if (this.currentHighlight) {
+            const id = this.currentHighlight;
+            if (this.map.getLayer(`${id}-fill`)) this.map.removeLayer(`${id}-fill`);
+            if (this.map.getLayer(`${id}-stroke`)) this.map.removeLayer(`${id}-stroke`);
+            if (this.map.getSource(id)) this.map.removeSource(id);
+            this.currentHighlight = null;
+        }
+    }
+}
+
+// map app
+class MapApp {
+    constructor() {
+        this.cache = new GeoJSONCache();
+        this.loader = new LoadingManager();
+        this.map = null;
+        this.config = null;
+        this.highlighter = null;
+        this.searchIndex = [];
+        this.fuse = null;
+    }
+
+    async fetchJSON(url) {
+        let data = await this.cache.get(url);
+        if (!data) {
+            const response = await fetch(url);
+            data = await response.json();
+            await this.cache.set(url, data);
+        }
+        return data;
+    }
+
+    async init() {
+        try {
+            this.loader.setTotal(6); // map, districts, subdistricts, special, labels, search
+
+            // index+map schema
+            this.config = await this.fetchJSON('./src/boundaries/index.json');
+            const style = await this.fetchJSON('./src/schema/basic_minlabel.json');
+
+            this.map = new maplibregl.Map({
+                container: 'map',
+                style,
+                zoom: 10,
+                pitchWithRotate: false
             });
-        };
 
-        input.addEventListener('awesomplete-selectcomplete', evt => {
-            handleFeatureSelection(evt.text.value);
-        });
+            this.highlighter = new FeatureHighlighter(this.map);
+            this.setupMapBounds();
+            this.setupMapControls();
+            this.loader.step('Map initializing');
 
-        input.addEventListener('keydown', evt => {
-            if (evt.key === 'Enter') {
-                handleFeatureSelection(input.value);
-                evt.preventDefault();
+            this.map.on('load', async () => {
+                await this.loadDistricts();
+                await this.loadSubdistricts();
+                await this.loadSpecialLayers();
+                await this.addLabels();
+                await this.setupSearch();
+                this.setupPopups();
+                this.loader.step('Complete!');
+                setTimeout(() => this.loader.hide(), 500);
+            });
+
+        } catch (error) {
+            console.error('Failed to initialize:', error);
+            this.loader.hide();
+        }
+    }
+
+    setupMapControls() {
+        this.map.addControl(new maplibregl.NavigationControl(), 'top-left');
+        this.map.addControl(new maplibregl.GeolocateControl({
+            positionOptions: {
+                enableHighAccuracy: true
+            },
+            trackUserLocation: true,
+            showUserHeading: true
+        }), 'top-left');
+        this.map.addControl(new SearchControl(), 'top-right');
+    }
+
+    setupMapBounds() {
+        const bounds = [[115.41686, 39.4415], [117.50904, 41.05923]];
+        this.map.fitBounds(bounds, {padding: 40});
+
+        const padding = 0.6;
+        const [sw, ne] = bounds;
+        const lngPad = (ne[0] - sw[0]) * padding;
+        const latPad = (ne[1] - sw[1]) * padding;
+        const maxBounds = [
+            [sw[0] - lngPad, sw[1] - latPad],
+            [ne[0] + lngPad, ne[1] + latPad]
+        ];
+        this.map.setMaxBounds(maxBounds);
+    }
+
+    async loadDistricts() {
+        for (const file of this.config.districtOutlines || []) {
+            await this.addDistrictLayer(file);
+        }
+
+        if (this.config.cityOutline) {
+            await this.addLayer('city-outline', this.config.cityOutline, 'cityOutline');
+        }
+
+        this.loader.step('Loading districts');
+    }
+
+    async loadSubdistricts() {
+        for (const file of this.config.subdistrictLayers || []) {
+            await this.addSubdistrictLayer(file);
+        }
+
+        this.loader.step('Loading subdistricts');
+    }
+
+    async loadSpecialLayers() {
+        for (const special of this.config.specialLayers || []) {
+            await this.addLayer(
+                special.file.split('/').pop().replace('.geojson', ''),
+                special.file,
+                special.styleRef
+            );
+        }
+
+        this.loader.step('Loading special layers');
+    }
+
+    async addSubdistrictLayer(file) {
+        const name = file.split('/').pop().replace('.geojson', '');
+        const data = await this.fetchJSON(file);
+
+        data.features.forEach(feature => {
+            const props = feature.properties || {};
+            if (props.Name) {
+                this.searchIndex.push({
+                    name: props.Name,
+                    code: props.code || '',
+                    pinyin: props.pinyin || '',
+                    type: 'subdistrict',
+                    feature
+                });
             }
         });
-    })
-    .catch(err => console.error('Error loading boundaries:', err));
 
-function updateLabelVisibility() {
-    const z = map.getZoom();
-    labelMarkers.forEach(({marker, minZoom, maxZoom}) => {
-        if (z >= minZoom && z <= maxZoom) map.addLayer(marker);
-        else map.removeLayer(marker);
-    });
-}
-
-function updateLayerStyles() {
-    geoJsonLayers.forEach(({layer, styleFn}) => {
-        layer.eachLayer(l => {
-            if (l.setStyle) l.setStyle(styleFn(l.feature));
+        this.map.addSource(`${name}-source`, {type: 'geojson', data});
+        this.map.addLayer({
+            id: `${name}-fill`,
+            type: 'fill',
+            source: `${name}-source`,
+            paint: this.config.styles.subdistrictFill.paint
         });
-    });
+
+        this.map.addLayer({
+            id: `${name}-line`,
+            type: 'line',
+            source: `${name}-source`,
+            paint: this.config.styles.subdistrictLine.paint
+        });
+    }
+
+    async addDistrictLayer(file) {
+        const name = file.split('/').pop().replace('.geojson', '');
+        const data = await this.fetchJSON(file);
+
+        data.features.forEach(feature => {
+            const props = feature.properties || {};
+            if (props.Name) {
+                this.searchIndex.push({
+                    name: props.Name,
+                    code: props.code || '',
+                    pinyin: props.pinyin || '',
+                    type: 'district',
+                    feature
+                });
+            }
+        });
+
+        await this.addLayer(`${name}-outline`, file, 'districtOutline');
+    }
+
+    async addLayer(id, file, styleRef) {
+        const data = await this.fetchJSON(file);
+        const style = this.config.styles[styleRef];
+
+        this.map.addSource(id, {type: 'geojson', data});
+        this.map.addLayer({
+            id,
+            type: style.type,
+            source: id,
+            paint: style.paint,
+            layout: style.layout || {}
+        });
+    }
+
+    async addLabels() {
+        for (const file of this.config.subdistrictLayers || []) {
+            await this.addLabelLayer(file, 'subdistrict');
+        }
+
+        for (const file of this.config.districtOutlines || []) {
+            await this.addLabelLayer(file, 'district');
+        }
+
+        this.loader.step('Adding labels');
+    }
+
+    async addLabelLayer(file, type) {
+        const name = file.split('/').pop().replace('.geojson', '');
+        const data = await this.fetchJSON(file);
+        const defaults = this.config.labelLayerDefaults[type];
+
+        const labelFeatures = data.features
+            .map(feature => {
+                const props = feature.properties || {};
+                const labelPoint = props.labelPoint;
+                if (labelPoint && Array.isArray(labelPoint) && labelPoint.length === 2) {
+                    return {
+                        type: 'Feature',
+                        properties: {Name: props.Name},
+                        geometry: {
+                            type: 'Point',
+                            coordinates: [labelPoint[1], labelPoint[0]]
+                        }
+                    };
+                }
+                return null;
+            })
+            .filter(f => f !== null);
+
+        if (labelFeatures.length > 0) {
+            const sourceId = `${name}-labels`;
+            this.map.addSource(sourceId, {
+                type: 'geojson',
+                data: {type: 'FeatureCollection', features: labelFeatures}
+            });
+
+            this.map.addLayer({
+                id: sourceId,
+                type: 'symbol',
+                source: sourceId,
+                minzoom: defaults.minzoom || (type === 'district' ? 8 : 10),
+                maxzoom: defaults.maxzoom || (type === 'district' ? 12 : 22),
+                layout: defaults.layout || {'text-field': ['get', 'Name']},
+                paint: defaults.paint || {}
+            });
+        }
+    }
+
+    async setupSearch() {
+        this.fuse = new Fuse(this.searchIndex, {
+            keys: ['name', 'code', 'pinyin'],
+            threshold: 0.3,
+            distance: 10,
+            includeScore: true,
+            includeMatches: true
+        });
+
+        const searchInput = document.getElementById('search');
+        if (!searchInput) return;
+        const SEARCH_PLACEHOLDER = "Search boundaries...";
+
+        function expandSearch() {
+            searchInput.classList.add('expanded');
+            searchInput.setAttribute('placeholder', SEARCH_PLACEHOLDER);
+        }
+
+        function collapseSearch() {
+            searchInput.classList.remove('expanded');
+            searchInput.setAttribute('placeholder', '');
+        }
+
+        searchInput.addEventListener('focus', expandSearch);
+        searchInput.addEventListener('blur', function () {
+            if (!searchInput.value) collapseSearch();
+        });
+        searchInput.addEventListener('click', expandSearch);
+        collapseSearch();
+
+        const awesomplete = new Awesomplete(searchInput, {
+            minChars: 1,
+            maxItems: 10,
+            autoFirst: true,
+            filter: () => true,
+            item: (text, input) => this.createSearchItem(JSON.parse(text.value))
+        });
+
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+            if (query.length === 0) {
+                awesomplete.list = [];
+                return;
+            }
+
+            const results = this.fuse.search(query).slice(0, 10);
+            awesomplete.list = results.map(result => ({
+                label: this.formatResult(result.item),
+                value: JSON.stringify({
+                    name: result.item.name,
+                    type: result.item.type,
+                    feature: result.item.feature
+                })
+            }));
+        });
+
+        searchInput.addEventListener('awesomplete-selectcomplete', (e) => {
+            const item = JSON.parse(e.text.value);
+            searchInput.value = item.name;
+
+            this.fitToFeature(item.feature);
+            this.highlighter.highlight(item.feature, item.type);
+        });
+
+        this.loader.step('Initializing search');
+    }
+
+    createSearchItem(item) {
+        const li = document.createElement('li');
+        const typeLabel = item.type === 'district' ? '区' : '街道/乡镇';
+        li.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>${item.name}</span>
+                <span style="font-size: 0.8em; color: #666;">${typeLabel}</span>
+            </div>
+        `;
+        return li;
+    }
+
+    formatResult(item) {
+        const typeLabel = item.type === 'district' ? '区' : '街道/乡镇';
+        return `${item.name} - ${typeLabel}`;
+    }
+
+    fitToFeature(feature) {
+        if (!feature.geometry) return;
+
+        const coords = [];
+        const extractCoords = (c) => {
+            if (typeof c[0] === 'number') {
+                coords.push(c);
+            } else {
+                c.forEach(extractCoords);
+            }
+        };
+        extractCoords(feature.geometry.coordinates);
+
+        if (coords.length === 0) return;
+
+        let minLng = coords[0][0], minLat = coords[0][1];
+        let maxLng = coords[0][0], maxLat = coords[0][1];
+
+        coords.forEach(([lng, lat]) => {
+            if (lng < minLng) minLng = lng;
+            if (lng > maxLng) maxLng = lng;
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+        });
+
+        this.map.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
+            padding: 40,
+            maxZoom: 16,
+            duration: 800
+        });
+    }
+
+    setupPopups() {
+        const popup = new maplibregl.Popup({
+            closeButton: true,
+            closeOnClick: false
+        });
+
+        const subdistrictLayers = (this.config.subdistrictLayers || [])
+            .map(file => file.split('/').pop().replace('.geojson', '') + '-fill');
+
+        subdistrictLayers.forEach(layerId => {
+            this.map.on('click', layerId, (e) => {
+                const feature = e.features[0];
+                const name = feature.properties.Name || 'Unknown';
+                popup.setLngLat(e.lngLat)
+                    .setHTML(`<div style="font-weight: 500;">${name}</div>`)
+                    .addTo(this.map);
+            });
+
+            this.map.on('mouseenter', layerId, () => {
+                this.map.getCanvas().style.cursor = 'pointer';
+            });
+
+            this.map.on('mouseleave', layerId, () => {
+                this.map.getCanvas().style.cursor = '';
+            });
+        });
+    }
 }
 
-map.on('zoomend', () => {
-    updateLabelVisibility();
-    updateLayerStyles();
-});
-map.whenReady(() => {
-    updateLabelVisibility();
-    updateLayerStyles();
-});
+const app = new MapApp();
+app.init();

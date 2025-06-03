@@ -543,10 +543,37 @@ class MapApp {
             if (lat > maxLat) maxLat = lat;
         });
 
-        this.map.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
-            padding: 40,
-            maxZoom: 16,
-            duration: 800
+        const centerLng = (minLng + maxLng) / 2;
+        const centerLat = (minLat + maxLat) / 2;
+
+        const lngDiff = maxLng - minLng;
+        const latDiff = maxLat - minLat;
+
+        const mapContainer = this.map.getContainer();
+        const containerWidth = mapContainer.offsetWidth;
+        const containerHeight = mapContainer.offsetHeight;
+
+        const padding = 100;
+        const availableWidth = containerWidth - (padding * 2);
+        const availableHeight = containerHeight - (padding * 2);
+
+        const lngZoom = Math.log2(360 * availableWidth / (lngDiff * 256));
+        const latZoom = Math.log2(180 * availableHeight / (latDiff * 256));
+
+        let zoom = Math.min(lngZoom, latZoom);
+        zoom = Math.min(14, Math.max(8, zoom));
+        //fly me to the moon
+        this.map.flyTo({
+            center: [centerLng, centerLat],
+            zoom: zoom,
+            duration: 1200,
+            essential: true,
+            // easeInOutCirc
+            easing: (x) => {
+                return x < 0.5
+                    ? (1 - Math.sqrt(1 - Math.pow(2 * x, 2))) / 2
+                    : (Math.sqrt(1 - Math.pow(-2 * x + 2, 2)) + 1) / 2;
+            }
         });
     }
 

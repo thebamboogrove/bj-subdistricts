@@ -7,17 +7,20 @@
 > Most special zones have NOT been included. 
 
 # Beijing Sub-district Boundaries
-Poorly implemented web-map of Beijing sub-district boundaries (2023-2024) using LeafletJS and OpenStreetMap data with MapTiler as a baselayer.\
+Poorly implemented web-map of Beijing sub-district boundaries (2023-2024) using MapLibre with OpenFreeMap © OpenMapTiles Data from OpenStreetMap.
 
 ## Attribution
-### LeafletJS
-Copyright (c), Volodymyr Agafonkin\
-Copyright (c), CloudMade\
-Released under the [BSD 2-Clause License](attr/leaflet).
+### MapLibre
+Copyright (c), MapLibre contributors\
+Released under [respective licenses](attr/maplibre)
 
-### Leaflet.Locate
-Copyright (c), Dominik Moritz\
-Released under the [MIT License](attr/leaflet-locatecontrol)
+### Fuse.js
+Copyright (c), Kirollos Risk\
+Released under the [Apache License 2.0](attr/fusejs).
+
+### Awesomeplete
+Copyright (c), Lea Verou\
+Released under the [MIT License](attr/awesomplete)
 
 ### Noto Sans SC
 Copyright (c), Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'\

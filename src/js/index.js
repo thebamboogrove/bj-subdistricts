@@ -149,7 +149,10 @@ class FeatureHighlighter {
 
         this.map.addSource(id, {
             type: 'geojson',
-            data: {type: 'FeatureCollection', features: [feature]}
+            data: {type: 'FeatureCollection', features: [feature]},
+            maxzoom: 12,
+            tolerance: 0.4,
+            buffer: 128
         });
 
         this.map.addLayer({
@@ -324,7 +327,7 @@ class MapApp {
             }
         });
 
-        this.map.addSource(`${name}-source`, {type: 'geojson', data});
+        this.map.addSource(`${name}-source`, {type: 'geojson', data, maxzoom: 12, tolerance: 0.4, buffer: 128});
         this.map.addLayer({
             id: `${name}-fill`,
             type: 'fill',
@@ -364,7 +367,7 @@ class MapApp {
         const data = await this.fetchJSON(file);
         const style = this.config.styles[styleRef];
 
-        this.map.addSource(id, {type: 'geojson', data});
+        this.map.addSource(id, {type: 'geojson', data, maxzoom: 12, tolerance: 0.4, buffer: 128});
         this.map.addLayer({
             id,
             type: style.type,
@@ -413,7 +416,10 @@ class MapApp {
             const sourceId = `${name}-labels`;
             this.map.addSource(sourceId, {
                 type: 'geojson',
-                data: {type: 'FeatureCollection', features: labelFeatures}
+                data: {type: 'FeatureCollection', features: labelFeatures},
+                maxzoom: 12,
+                tolerance: 0.4,
+                buffer: 128
             });
 
             this.map.addLayer({

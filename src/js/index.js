@@ -1,3 +1,4 @@
+// TODO: better indexDB + cleanup functionality
 // indexDB geojson cache
 class GeoJSONCache {
     constructor() {
@@ -53,7 +54,7 @@ class GeoJSONCache {
     }
 }
 
-// search control to map controls
+// search control -> map controls
 class SearchControl {
     constructor() {
         this._container = null;
@@ -81,7 +82,7 @@ class SearchControl {
         this._map = undefined;
     }
 }
-
+// TODO: Loading function rework
 // loading function
 class LoadingManager {
     constructor() {
@@ -141,6 +142,7 @@ class FeatureHighlighter {
         this.clear();
 
         const id = `highlight-${Date.now()}`;
+        // TODO: Better highlight colors?
         const colors = {
             district: {fill: '#ff6b35', stroke: '#ff4500'},
             subdistrict: {fill: '#4ecdc4', stroke: '#26a69a'}
@@ -177,7 +179,7 @@ class FeatureHighlighter {
 
         this.currentHighlight = id;
 
-        // instead of clear use animate?
+        // TODO: Instead of clear w/ timeout use smoother animation?
         setTimeout(() => this.clear(), 3000);
     }
 
@@ -319,7 +321,7 @@ class MapApp {
             if (props.Name) {
                 this.searchIndex.push({
                     name: props.Name,
-                    code: props.code || '',
+                    code: String(props.code || ''),
                     pinyin: props.pinyin || '',
                     type: 'subdistrict',
                     feature
@@ -352,7 +354,7 @@ class MapApp {
             if (props.Name) {
                 this.searchIndex.push({
                     name: props.Name,
-                    code: props.code || '',
+                    code: String(props.code || ''),
                     pinyin: props.pinyin || '',
                     type: 'district',
                     feature
@@ -434,13 +436,80 @@ class MapApp {
         }
     }
 
+    createSearchItem(item, matches = []) {
+        const li = document.createElement('li');
+        const typeLabel = item.type === 'district' ? '区' : '街道/乡镇';
+
+        const applyHighlights = (text, fieldMatches) => {
+            if (!fieldMatches || fieldMatches.length === 0) return text;
+
+            let highlightedText = text;
+            const highlights = [];
+
+            fieldMatches.forEach(match => {
+                match.indices.forEach(([start, end]) => {
+                    highlights.push({ start, end });
+                });
+            });
+
+            highlights.sort((a, b) => b.start - a.start);
+
+            highlights.forEach(({ start, end }) => {
+                const before = highlightedText.substring(0, start);
+                const highlighted = highlightedText.substring(start, end + 1);
+                const after = highlightedText.substring(end + 1);
+                highlightedText = before + '<mark>' + highlighted + '</mark>' + after;
+            });
+
+            return highlightedText;
+        };
+
+        const nameMatches = matches.filter(m => m.key === 'name');
+        const codeMatches = matches.filter(m => m.key === 'code');
+        // TODO: Some clever pinyin highlighting?
+        // const pinyinMatches = matches.filter(m => m.key === 'pinyin');
+
+        const highlightedName = applyHighlights(item.name, nameMatches);
+        const highlightedCode = applyHighlights(item.code, codeMatches);
+
+        li.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span>${highlightedName}</span>
+                <span style="font-size: 0.8em; color: #666;">${typeLabel}</span>
+            </div>
+            <div><span style="font-size: 0.8em; color: #888;">${highlightedCode}</span></div>
+        `;
+        return li;
+    }
+
     async setupSearch() {
+        // TODO: fuse.js weight adjustment
         this.fuse = new Fuse(this.searchIndex, {
-            keys: ['name', 'code', 'pinyin'],
-            threshold: 0.3,
-            distance: 10,
+            keys: [
+                {
+                    name: 'name',
+                    weight: 0.6,
+                    threshold: 0.4,
+                    distance: 100
+                },
+                {
+                    name: 'code',
+                    weight: 0.3,
+                    threshold: 0.1,
+                    distance: 10
+                },
+                {
+                    name: 'pinyin',
+                    weight: 0.1,
+                    threshold: 0.3,
+                    distance: 50
+                }
+            ],
             includeScore: true,
-            includeMatches: true
+            includeMatches: true,
+            ignoreLocation: true,
+            findAllMatches: true,
+            minMatchCharLength: 1
         });
 
         const searchInput = document.getElementById('search');
@@ -462,6 +531,9 @@ class MapApp {
             if (!searchInput.value) collapseSearch();
         });
         searchInput.addEventListener('click', expandSearch);
+
+        //TODO: Add a clear search button
+
         collapseSearch();
 
         const awesomplete = new Awesomplete(searchInput, {
@@ -469,29 +541,44 @@ class MapApp {
             maxItems: 10,
             autoFirst: true,
             filter: () => true,
-            item: (text, input) => this.createSearchItem(JSON.parse(text.value))
+            item: (text, input) => {
+                const data = JSON.parse(text.value);
+                return this.createSearchItem(data.item, data.matches);
+            }
         });
 
         searchInput.addEventListener('input', (e) => {
             const query = e.target.value.trim();
+
             if (query.length === 0) {
                 awesomplete.list = [];
                 return;
             }
 
-            const results = this.fuse.search(query).slice(0, 10);
+            const isNumericQuery = /^\d+$/.test(query);
+            let results = this.fuse.search(query).slice(0, 10);
+
+            if (isNumericQuery) {
+                results = results.filter(result => {
+                    const hasCodeMatch = result.matches && result.matches.some(m => m.key === 'code');
+                    if (hasCodeMatch) {
+                        return result.item.code.startsWith(query);
+                    }
+                    return true;
+                });
+            }
             awesomplete.list = results.map(result => ({
                 label: this.formatResult(result.item),
                 value: JSON.stringify({
-                    name: result.item.name,
-                    type: result.item.type,
-                    feature: result.item.feature
+                    item: result.item,
+                    matches: result.matches || []
                 })
             }));
         });
 
         searchInput.addEventListener('awesomplete-selectcomplete', (e) => {
-            const item = JSON.parse(e.text.value);
+            const data = JSON.parse(e.text.value);
+            const item = data.item;
             searchInput.value = item.name;
 
             this.fitToFeature(item.feature);
@@ -499,18 +586,6 @@ class MapApp {
         });
 
         this.loader.step('Initializing search');
-    }
-
-    createSearchItem(item) {
-        const li = document.createElement('li');
-        const typeLabel = item.type === 'district' ? '区' : '街道/乡镇';
-        li.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span>${item.name}</span>
-                <span style="font-size: 0.8em; color: #666;">${typeLabel}</span>
-            </div>
-        `;
-        return li;
     }
 
     formatResult(item) {

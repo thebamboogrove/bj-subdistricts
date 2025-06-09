@@ -209,7 +209,7 @@ input#search {
     top: 10px;
     right: 60px;
     width: 400px;
-    max-height: calc(100vh - 20px);
+    max-height: calc(100dvh - 20px);
     background: white;
     border-radius: 8px;
     box-shadow: 0 0 0 2px rgba(0,0,0,.1);
@@ -290,7 +290,7 @@ input#search {
 }
 
 .visibility-controls input[type="range"] {
-    max-width: 100%;
+    width: 100%;
 }
 
 .style-controls {

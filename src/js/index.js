@@ -4,7 +4,7 @@
 class GeoJSONCache {
     constructor() {
         this.dbName = 'GeoJSONCache';
-        this.version = 101;
+        this.version = 102;
         this.storeName = 'geojson';
         this.db = null;
     }
@@ -19,9 +19,10 @@ class GeoJSONCache {
             };
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
-                if (!db.objectStoreNames.contains(this.storeName)) {
-                    db.createObjectStore(this.storeName, {keyPath: 'url'});
+                if (db.objectStoreNames.contains(this.storeName)) {
+                    db.deleteObjectStore(this.storeName);
                 }
+                db.createObjectStore(this.storeName, {keyPath: 'url'});
             };
         });
     }

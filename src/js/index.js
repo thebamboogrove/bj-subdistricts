@@ -1,16 +1,15 @@
 // TODO: better indexDB + cleanup functionality
+// TODO: refactor everything
 // indexDB geojson cache
 class GeoJSONCache {
     constructor() {
         this.dbName = 'GeoJSONCache';
-        this.version = 100;
+        this.version = 101;
         this.storeName = 'geojson';
         this.db = null;
     }
-
     async init() {
         if (this.db) return;
-
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.version);
             request.onerror = () => reject(request.error);
@@ -204,6 +203,10 @@ class MapApp {
         this.highlighter = null;
         this.searchIndex = [];
         this.fuse = null;
+        // Initialize marking system
+        this.markingCache = null;
+        this.markingManager = null;
+        this.markingControl = null;
     }
 
     async fetchJSON(url) {
@@ -218,7 +221,7 @@ class MapApp {
 
     async init() {
         try {
-            this.loader.setTotal(6); // map, districts, subdistricts, special, labels, search
+            this.loader.setTotal(8); // map, districts, subdistricts, special, labels, search, marking, complete
 
             // index+map schema
             this.config = await this.fetchJSON('./src/boundaries/index.json');
@@ -242,6 +245,7 @@ class MapApp {
                 await this.loadSpecialLayers();
                 await this.addLabels();
                 await this.setupSearch();
+                await this.setupMarkingSystem();
                 this.setupPopups();
                 this.loader.step('Complete!');
                 setTimeout(() => this.loader.hide(), 500);
@@ -263,6 +267,31 @@ class MapApp {
             showUserHeading: true
         }), 'top-left');
         this.map.addControl(new SearchControl(), 'top-right');
+    }
+
+    async setupMarkingSystem() {
+        try {
+            // Import marking system classes
+            await import('./marking-system.js');
+
+            this.markingCache = new MarkingCache();
+            this.markingManager = new MarkingManager(this.map, this.markingCache);
+            this.markingManager.setSearchIndex(this.searchIndex);
+
+            await this.markingManager.init();
+
+            // Ensure feature states and paint properties are applied after all layers are loaded
+            this.markingManager.applyAllFeatureStates();
+            this.markingManager.updatePaintProperties();
+
+            this.markingControl = new MarkingControl(this.markingManager, this.searchIndex);
+            this.map.addControl(this.markingControl, 'top-right');
+
+            this.loader.step('Initializing marking system');
+        } catch (error) {
+            console.error('Failed to setup marking system:', error);
+            this.loader.step('Marking system unavailable');
+        }
     }
 
     setupMapBounds() {
@@ -316,25 +345,83 @@ class MapApp {
         const name = file.split('/').pop().replace('.geojson', '');
         const data = await this.fetchJSON(file);
 
-        data.features.forEach(feature => {
+        data.features.forEach((feature, index) => {
             const props = feature.properties || {};
             if (props.Name) {
+                // Use code as integer featureId if possible, fallback to hash
+                let featureId;
+                if (typeof props.code === 'string' && /^\d+$/.test(props.code)) {
+                    featureId = parseInt(props.code, 10);
+                } else if (typeof props.code === 'number' && Number.isInteger(props.code)) {
+                    featureId = props.code;
+                } else {
+                    // Fallback: hash Name
+                    let hash = 0;
+                    const nameStr = props.Name || 'unknown';
+                    for (let i = 0; i < nameStr.length; i++) {
+                        hash = ((hash << 5) - hash) + nameStr.charCodeAt(i);
+                        hash |= 0;
+                    }
+                    featureId = Math.abs(hash);
+                }
+
+                // CRITICAL: Set the id property on the feature itself
+                feature.id = featureId;
+
                 this.searchIndex.push({
                     name: props.Name,
                     code: String(props.code || ''),
                     pinyin: props.pinyin || '',
                     type: 'subdistrict',
-                    feature
+                    feature,
+                    featureId,
+                    sourceId: `${name}-source`
                 });
             }
         });
 
-        this.map.addSource(`${name}-source`, {type: 'geojson', data, maxzoom: 12, tolerance: 0.4, buffer: 128});
+        this.map.addSource(`${name}-source`, {
+            type: 'geojson',
+            data,
+            maxzoom: 12,
+            tolerance: 0.4,
+            buffer: 128
+        });
+
         this.map.addLayer({
             id: `${name}-fill`,
             type: 'fill',
             source: `${name}-source`,
-            paint: this.config.styles.subdistrictFill.paint
+            paint: {
+                'fill-color': [
+                    'case',
+                    ['boolean', ['feature-state', 'marked'], false],
+                    '#e41e32', // Red for marked features
+                    ['boolean', ['feature-state', 'unmarked'], false],
+                    '#cccccc', // Gray for explicitly unmarked features
+                    // Default color mapping based on color_id
+                    [
+                        'match',
+                        ['get', 'color_id'],
+                        1, '#e41e32',
+                        2, '#ff782a',
+                        3, '#e2cf04',
+                        4, '#98c217',
+                        5, '#3f64ce',
+                        6, '#7e2b8e',
+                        '#cccccc'
+                    ]
+                ],
+                // Initialize with simple opacity - will be updated by marking manager
+                'fill-opacity': [
+                    'case',
+                    ['boolean', ['feature-state', 'marked'], false],
+                    0.8,
+                    ['boolean', ['feature-state', 'unmarked'], false],
+                    0.2,
+                    0.2 // Default opacity
+                ]
+            }
         });
 
         this.map.addLayer({
@@ -352,12 +439,30 @@ class MapApp {
         data.features.forEach(feature => {
             const props = feature.properties || {};
             if (props.Name) {
+                // Use code as integer featureId if possible, fallback to hash
+                let featureId;
+                if (typeof props.code === 'string' && /^\d+$/.test(props.code)) {
+                    featureId = parseInt(props.code, 10);
+                } else if (typeof props.code === 'number' && Number.isInteger(props.code)) {
+                    featureId = props.code;
+                } else {
+                    // Fallback: hash Name
+                    let hash = 0;
+                    const nameStr = props.Name || 'unknown';
+                    for (let i = 0; i < nameStr.length; i++) {
+                        hash = ((hash << 5) - hash) + nameStr.charCodeAt(i);
+                        hash |= 0;
+                    }
+                    featureId = Math.abs(hash) + 100000; // offset for districts
+                }
                 this.searchIndex.push({
                     name: props.Name,
                     code: String(props.code || ''),
                     pinyin: props.pinyin || '',
                     type: 'district',
-                    feature
+                    feature,
+                    featureId,
+                    sourceId: `${name}-outline` // for districts, use outline source
                 });
             }
         });
@@ -665,8 +770,28 @@ class MapApp {
             this.map.on('click', layerId, (e) => {
                 const feature = e.features[0];
                 const name = feature.properties.Name || 'Unknown';
+
+                // Find the search item for this feature
+                const searchItem = this.searchIndex.find(item =>
+                    item.name === name && item.type === 'subdistrict'
+                );
+
+                let markButtonHtml = '';
+                if (this.markingManager && searchItem) {
+                    const isMarked = this.markingManager.isMarked(searchItem);
+                    markButtonHtml = `
+                    <button class="popup-mark-btn ${isMarked ? 'marked' : ''}" 
+                            onclick="window.mapApp.toggleFeatureMarking('${name}', 'subdistrict', ${!isMarked})">
+                        ${isMarked ? 'Unmark' : 'Mark'} Sub-district
+                    </button>
+                `;
+                }
+
                 popup.setLngLat(e.lngLat)
-                    .setHTML(`<div style="font-weight: 500;">${name}</div>`)
+                    .setHTML(`
+                    <div style="font-weight: 500;">${name}</div>
+                    ${markButtonHtml}
+                `)
                     .addTo(this.map);
             });
 
@@ -679,7 +804,25 @@ class MapApp {
             });
         });
     }
+
+    async toggleFeatureMarking(featureName, type, marked) {
+        if (!this.markingManager) return;
+
+        await this.markingManager.markFeatureByName(featureName, type, marked);
+
+        // Update the control panel if it's open
+        if (this.markingControl && this.markingControl.isOpen) {
+            this.markingControl.updatePanel();
+        }
+
+        // Close and refresh popup
+        const popups = document.getElementsByClassName('maplibregl-popup');
+        if (popups.length > 0) {
+            popups[0].remove();
+        }
+    }
 }
 
-const app = new MapApp();
-app.init();
+// Make the app globally accessible for popup interactions
+window.mapApp = new MapApp();
+window.mapApp.init();

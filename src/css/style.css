@@ -1,3 +1,6 @@
+/* TODO: Consistency w/ styling */
+/* TODO: Better styling         */
+
 body {
     font-family: "Noto Sans SC", sans-serif;
     font-style: normal;
@@ -5,6 +8,13 @@ body {
     margin: 0;
     padding: 0;
     overflow: hidden;
+}
+
+button {
+    font-family: "Noto Sans SC", sans-serif;
+    font-style: normal;
+    font-optical-sizing: auto;
+    cursor: pointer;
 }
 
 #map {
@@ -32,6 +42,8 @@ body {
     line-height: 1em;
 }
 #search-container {
+    z-index: 999;
+    position: relative;
     font-family: "Noto Sans SC", sans-serif;
 }
 
@@ -174,6 +186,365 @@ body {
 
 input#search {
     font-family: 'Noto Sans SC', sans-serif;
+}
+.marking-control-btn {
+    background: white;
+    border: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s ease;
+}
+
+.marking-control-btn:hover {
+    background-color: #f0f0f0;
+}
+
+.marking-panel {
+    position: fixed;
+    top: 10px;
+    right: 60px;
+    width: 400px;
+    max-height: calc(100vh - 20px);
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 0 0 2px rgba(0,0,0,.1);
+    z-index: 1000;
+    font-family: "Noto Sans SC", sans-serif;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.marking-panel-header {
+    padding: 16px 20px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.marking-panel-header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 500;
+    color: #333;
+}
+
+.marking-panel-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: #666;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+
+.marking-panel-close:hover {
+    background: #e9ecef;
+}
+
+.marking-panel-content {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.marking-stats {
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 6px;
+    margin-bottom: 20px;
+    text-align: center;
+    font-weight: 500;
+}
+
+.marking-controls {
+}
+
+.visibility-controls {
+    margin-bottom: 1em;
+    display: flex;
+    gap: 1em;
+}
+
+.visibility-controls label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.visibility-controls input[type="checkbox"] {
+    margin-right: 8px;
+}
+
+.visibility-controls input[type="range"] {
+    max-width: 100%;
+}
+
+.style-controls {
+    border-top: 1px solid #e9ecef;
+    padding-top: 16px;
+}
+
+.style-group {
+    margin-bottom: 16px;
+}
+
+.style-group h4 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: #333;
+}
+
+.style-group label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.style-group input[type="color"] {
+    width: 40px;
+    height: 30px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.style-group input[type="range"] {
+    width: 100px;
+}
+
+.feature-list-container {
+    border-top: 1px solid #e9ecef;
+    padding-top: 16px;
+}
+
+.feature-list-container h4 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: #333;
+}
+
+.feature-list {
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+}
+
+.district-group {
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.district-group:last-child {
+    border-bottom: none;
+}
+
+.district-header {
+    padding: 12px 16px;
+    background: #f8f9fa;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+}
+
+.district-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+}
+
+.district-info h5 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: #333;
+}
+
+.district-stats {
+    font-size: 12px;
+    color: #666;
+    background: #e9ecef;
+    padding: 2px 6px;
+    border-radius: 12px;
+}
+
+.mark-district-btn {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    min-width: 8em;
+}
+
+.mark-district-btn:hover {
+    background: #0056b3;
+}
+
+.mark-district-btn.marked {
+    background: #dc3545;
+}
+
+.mark-district-btn.marked:hover {
+    background: #c82333;
+}
+
+.subdistrict-list {
+}
+
+.subdistrict-item {
+    padding: 8px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.subdistrict-item:last-child {
+    border-bottom: none;
+}
+
+.subdistrict-name {
+    font-size: 13px;
+    color: #333;
+    flex: 1;
+    margin-right: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mark-btn {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    min-width: 6em;
+}
+
+.mark-btn:hover {
+    background: #218838;
+}
+
+.mark-btn.marked {
+    background: #dc3545;
+}
+
+.mark-btn.marked:hover {
+    background: #c82333;
+}
+
+.marking-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.marking-actions button {
+    flex: 1;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+#clear-all-markings {
+    background: #dc3545;
+    color: white;
+}
+
+#clear-all-markings:hover {
+    background: #c82333;
+}
+
+#export-markings {
+    background: #28a745;
+    color: white;
+}
+
+#export-markings:hover {
+    background: #218838;
+}
+
+#import-markings {
+    background: #007bff;
+    color: white;
+}
+
+#import-markings:hover {
+    background: #0056b3;
+}
+
+.popup-mark-btn {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: background-color 0.2s ease;
+}
+
+.popup-mark-btn:hover {
+    background: #0056b3;
+}
+
+.popup-mark-btn.marked {
+    background: #dc3545;
+}
+
+.popup-mark-btn.marked:hover {
+    background: #c82333;
+}
+
+.district-chevron {
+    display: inline-block;
+    user-select: none;
+    font-size: 0.6em;
+    margin-right: 1em;
+    transition: transform 0.1s;
+}
+
+@media (max-width: 768px) {
+    .marking-panel {
+        width: calc(100vw - 20px);
+        right: 10px;
+    }
+
+    .marking-actions button {
+        flex: 1 1 100%;
+    }
+
+    .district-info {
+    }
 }
 
 @font-face {

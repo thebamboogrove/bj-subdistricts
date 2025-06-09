@@ -4,7 +4,7 @@
 class GeoJSONCache {
     constructor() {
         this.dbName = 'GeoJSONCache';
-        this.version = 100;
+        this.version = 101;
         this.storeName = 'geojson';
         this.db = null;
     }

@@ -8,7 +8,7 @@ class MarkingCache extends GeoJSONCache {
     constructor() {
         super();
         this.dbName = 'MapMarkingCache';
-        this.version = 101;
+        this.version = 102;
         this.markingStoreName = 'markings';
         this.settingsStoreName = 'settings';
     }
@@ -25,12 +25,14 @@ class MarkingCache extends GeoJSONCache {
             };
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
-                if (!db.objectStoreNames.contains(this.markingStoreName)) {
-                    db.createObjectStore(this.markingStoreName, {keyPath: 'id'});
+                if (db.objectStoreNames.contains(this.markingStoreName)) {
+                    db.deleteObjectStore(this.markingStoreName);
                 }
-                if (!db.objectStoreNames.contains(this.settingsStoreName)) {
-                    db.createObjectStore(this.settingsStoreName, {keyPath: 'key'});
+                db.createObjectStore(this.markingStoreName, {keyPath: 'id'});
+                if (db.objectStoreNames.contains(this.settingsStoreName)) {
+                    db.deleteObjectStore(this.settingsStoreName);
                 }
+                db.createObjectStore(this.settingsStoreName, {keyPath: 'key'});
             };
         });
     }

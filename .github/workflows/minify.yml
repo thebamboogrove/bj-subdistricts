@@ -24,5 +24,5 @@ jobs:
       - run: |
           git config user.name thebamboogrove
           git config user.email 127660177+thebamboogrove@users.noreply.github.com
-          git config commit -am 'Auto-minify of ${{ github.sha }}'
+          git commit -am 'Auto-minify of ${{ github.sha }}'
           git push --force -u origin master:gh-pages

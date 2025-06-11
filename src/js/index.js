@@ -4,10 +4,12 @@
 class GeoJSONCache {
     constructor() {
         this.dbName = 'GeoJSONCache';
-        this.version = 102;
+        this.version = 103;
         this.storeName = 'geojson';
         this.db = null;
+        this.compressionSupported = typeof CompressionStream !== 'undefined';
     }
+
     async init() {
         if (this.db) return;
         return new Promise((resolve, reject) => {
@@ -35,9 +37,12 @@ class GeoJSONCache {
             const request = store.get(url);
             request.onsuccess = () => {
                 const result = request.result;
-                // Simple 7-day expiry
                 if (result && Date.now() - result.timestamp < 7 * 24 * 60 * 60 * 1000) {
-                    resolve(result.data);
+                    if (result.compressed && this.compressionSupported) {
+                        this.decompressData(result.data).then(resolve).catch(() => resolve(null));
+                    } else {
+                        resolve(result.data);
+                    }
                 } else {
                     resolve(null);
                 }
@@ -50,7 +55,68 @@ class GeoJSONCache {
         await this.init();
         const tx = this.db.transaction([this.storeName], 'readwrite');
         const store = tx.objectStore(this.storeName);
-        store.put({url, data, timestamp: Date.now()});
+
+        let storeData = data;
+        let compressed = false;
+
+        if (this.compressionSupported && typeof data === 'object') {
+            try {
+                storeData = await this.compressData(JSON.stringify(data));
+                compressed = true;
+            } catch (error) {
+                console.warn('indexedDB compression failed', error);
+                storeData = data;
+            }
+        }
+
+        store.put({
+            url,
+            data: storeData,
+            compressed,
+            timestamp: Date.now()
+        });
+    }
+
+    async compressData(text) {
+        const stream = new CompressionStream('gzip');
+        const writer = stream.writable.getWriter();
+        const reader = stream.readable.getReader();
+
+        writer.write(new TextEncoder().encode(text));
+        writer.close();
+
+        const chunks = [];
+        let done = false;
+
+        while (!done) {
+            const {value, done: readerDone} = await reader.read();
+            done = readerDone;
+            if (value) chunks.push(value);
+        }
+
+        return new Uint8Array(chunks.reduce((acc, chunk) => [...acc, ...chunk], []));
+    }
+
+    async decompressData(compressedData) {
+        const stream = new DecompressionStream('gzip');
+        const writer = stream.writable.getWriter();
+        const reader = stream.readable.getReader();
+
+        writer.write(compressedData);
+        writer.close();
+
+        const chunks = [];
+        let done = false;
+
+        while (!done) {
+            const {value, done: readerDone} = await reader.read();
+            done = readerDone;
+            if (value) chunks.push(value);
+        }
+
+        const decompressed = new Uint8Array(chunks.reduce((acc, chunk) => [...acc, ...chunk], []));
+        const text = new TextDecoder().decode(decompressed);
+        return JSON.parse(text);
     }
 }
 
@@ -82,6 +148,7 @@ class SearchControl {
         this._map = undefined;
     }
 }
+
 // TODO: Loading function rework
 // loading function
 class LoadingManager {
@@ -204,17 +271,54 @@ class MapApp {
         this.highlighter = null;
         this.searchIndex = [];
         this.fuse = null;
+        this.compressionSupported = this.checkCompressionSupport();
+
         // Initialize marking system
         this.markingCache = null;
         this.markingManager = null;
         this.markingControl = null;
     }
 
-    async fetchJSON(url) {
+    checkCompressionSupport() {
+        const hasCompressionStreams = typeof DecompressionStream !== 'undefined';
+
+        console.log(`Compression support: ${hasCompressionStreams ? 'Yes' : 'No'}`);
+        return hasCompressionStreams;
+    }
+
+    async fetchJSON(url, options = {}) {
+        const { enableCompression = true } = options;
+        const fetchCompression = enableCompression &&
+            (url.includes('.geojson') || url.includes('/boundaries/'));
         let data = await this.cache.get(url);
         if (!data) {
-            const response = await fetch(url);
-            data = await response.json();
+            if (fetchCompression && this.compressionSupported) {
+                try {
+                    const gzipUrl = url + '.gz';
+                    const response = await fetch(gzipUrl);
+                    if (response.ok) {
+                        const stream = response.body.pipeThrough(new DecompressionStream('gzip'));
+                        const decompressedResponse = new Response(stream);
+                        data = await decompressedResponse.json();
+                    }
+                } catch (error) {
+                    console.log('gz failed, trying ghpages', error);
+                }
+            }
+            if (fetchCompression && !data) {
+                try {
+                    const response = await fetch(url + '.gz');
+                    if (response.ok) {
+                        data = await response.json();
+                    }
+                } catch (error) {
+                    console.log('gz ghpages, fallback to decompressed', error);
+                }
+            }
+            if (!data) {
+                const response = await fetch(url);
+                data = await response.json();
+            }
             await this.cache.set(url, data);
         }
         return data;
@@ -225,8 +329,8 @@ class MapApp {
             this.loader.setTotal(8); // map, districts, subdistricts, special, labels, search, marking, complete
 
             // index+map schema
-            this.config = await this.fetchJSON('./src/boundaries/index.json');
-            const style = await this.fetchJSON('./src/schema/basic_minlabel.json');
+            this.config = await this.fetchJSON('./src/boundaries/index.json', { enableCompression: false });
+            const style = await this.fetchJSON('./src/schema/basic_minlabel.json', { enableCompression: false });
 
             this.map = new maplibregl.Map({
                 container: 'map',
@@ -273,6 +377,7 @@ class MapApp {
     async setupMarkingSystem() {
         try {
             // Import marking system classes
+            this.loader.step('Initializing marking system');
             await import('./marking-system.js');
 
             this.markingCache = new MarkingCache();
@@ -288,7 +393,6 @@ class MapApp {
             this.markingControl = new MarkingControl(this.markingManager, this.searchIndex);
             this.map.addControl(this.markingControl, 'top-right');
 
-            this.loader.step('Initializing marking system');
         } catch (error) {
             console.error('Failed to setup marking system:', error);
             this.loader.step('Marking system unavailable');
@@ -311,6 +415,7 @@ class MapApp {
     }
 
     async loadDistricts() {
+        this.loader.step('Loading districts');
         for (const file of this.config.districtOutlines || []) {
             await this.addDistrictLayer(file);
         }
@@ -318,19 +423,17 @@ class MapApp {
         if (this.config.cityOutline) {
             await this.addLayer('city-outline', this.config.cityOutline, 'cityOutline');
         }
-
-        this.loader.step('Loading districts');
     }
 
     async loadSubdistricts() {
+        this.loader.step('Loading subdistricts');
         for (const file of this.config.subdistrictLayers || []) {
             await this.addSubdistrictLayer(file);
         }
-
-        this.loader.step('Loading subdistricts');
     }
 
     async loadSpecialLayers() {
+        this.loader.step('Loading special layers');
         for (const special of this.config.specialLayers || []) {
             await this.addLayer(
                 special.file.split('/').pop().replace('.geojson', ''),
@@ -338,8 +441,6 @@ class MapApp {
                 special.styleRef
             );
         }
-
-        this.loader.step('Loading special layers');
     }
 
     async addSubdistrictLayer(file) {
@@ -365,10 +466,7 @@ class MapApp {
                     }
                     featureId = Math.abs(hash);
                 }
-
-                // CRITICAL: Set the id property on the feature itself
                 feature.id = featureId;
-
                 this.searchIndex.push({
                     name: props.Name,
                     code: String(props.code || ''),
@@ -397,10 +495,9 @@ class MapApp {
                 'fill-color': [
                     'case',
                     ['boolean', ['feature-state', 'marked'], false],
-                    '#e41e32', // Red for marked features
+                    '#1e56e4',
                     ['boolean', ['feature-state', 'unmarked'], false],
-                    '#cccccc', // Gray for explicitly unmarked features
-                    // Default color mapping based on color_id
+                    '#a34b4b',
                     [
                         'match',
                         ['get', 'color_id'],
@@ -413,7 +510,6 @@ class MapApp {
                         '#cccccc'
                     ]
                 ],
-                // Initialize with simple opacity - will be updated by marking manager
                 'fill-opacity': [
                     'case',
                     ['boolean', ['feature-state', 'marked'], false],
@@ -554,13 +650,13 @@ class MapApp {
 
             fieldMatches.forEach(match => {
                 match.indices.forEach(([start, end]) => {
-                    highlights.push({ start, end });
+                    highlights.push({start, end});
                 });
             });
 
             highlights.sort((a, b) => b.start - a.start);
 
-            highlights.forEach(({ start, end }) => {
+            highlights.forEach(({start, end}) => {
                 const before = highlightedText.substring(0, start);
                 const highlighted = highlightedText.substring(start, end + 1);
                 const after = highlightedText.substring(end + 1);

@@ -1,0 +1,44 @@
+name: Compress GeoJSON Files
+on:
+  push:
+    paths:
+      - '**/*.geojson'
+
+jobs:
+  compress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Compress GeoJSON files
+        run: |
+          #!/bin/bash
+          
+          compress_file() {
+            local file="$1"
+            echo "Processing: $file"
+          
+            if command -v jq &> /dev/null; then
+              jq -c . "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+            else
+              sed -e 's/[[:space:]]*//g' -e 's/,[[:space:]]*,/,/g' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+            fi
+          
+            gzip -9 -c "$file" > "$file.gz"
+          }
+          
+          find . -name "*.geojson" -type f -not -path "./node_modules/*" -not -path "./.git/*" | while read -r file; do
+            compress_file "$file"
+          done
+
+      - name: Commit compressed files
+        run: |
+          git config user.name thebamboogrove
+          git config user.email 127660177+thebamboogrove@users.noreply.github.com
+          git add "*.geojson.gz"
+          
+          if ! git diff --staged --quiet; then
+            git commit -am "Auto-compress GeoJSON ${{ github.sha }}"
+            git push --force -u origin master:gh-pages
+          else
+            echo "No changes to commit"
+          fi

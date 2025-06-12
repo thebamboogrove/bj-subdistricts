@@ -29,23 +29,13 @@ jobs:
       - run: csso ./src/css/style.css -o ./src/css/style.css
       - run: for i in ./src/js/*.js; do terser $i --compress -o $i; done
 
-      - name: Commit minified files
+      - name: Deploy to gh-pages
         run: |
           git config user.name thebamboogrove
           git config user.email 127660177+thebamboogrove@users.noreply.github.com
 
           git add .
-          if ! git diff --staged --quiet; then
-            git commit -m "Auto-minify files ${{ github.sha }}"
-            git push origin master
-          else
-            echo "No changes to commit"
-          fi
-
-      - name: Deploy to gh-pages
-        run: |
-          git add .
-          git stash push -m "Current workflow changes"
+          git stash push -m "Minified files"
 
           git fetch origin
           if git checkout gh-pages 2>/dev/null; then

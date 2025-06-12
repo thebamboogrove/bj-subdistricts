@@ -29,8 +29,18 @@ jobs:
       - run: csso ./src/css/style.css -o ./src/css/style.css
       - run: for i in ./src/js/*.js; do terser $i --compress -o $i; done
 
-      - run: |
+      - name: Commit compressed files
+        run: |
           git config user.name thebamboogrove
           git config user.email 127660177+thebamboogrove@users.noreply.github.com
-          git commit -am 'Auto-minify of ${{ github.sha }}'
-          git push --force -u origin master:gh-pages
+          
+          git add .
+          if ! git diff --staged --quiet; then
+            git commit -m "Auto-compress files ${{ github.sha }}"
+            git fetch origin gh-pages:gh-pages || true
+            git checkout gh-pages || git checkout --orphan gh-pages
+            git merge origin/master --no-edit
+            git push origin gh-pages
+          else
+            echo "No changes to commit"
+          fi

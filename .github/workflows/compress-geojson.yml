@@ -1,6 +1,7 @@
-name: Compress GeoJSON Files
+name: compress-geojson.yml
+run-name: Compress GeoJSON Files
 on:
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
   push:
     paths:
       - '**/*.geojson'
@@ -13,36 +14,59 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+
       - name: Compress GeoJSON files
         run: |
           #!/bin/bash
-          
           compress_file() {
             local file="$1"
             echo "Processing: $file"
-          
             if command -v jq &> /dev/null; then
               jq -c . "$file" > "$file.tmp" && mv "$file.tmp" "$file"
             else
               sed -e 's/[[:space:]]*//g' -e 's/,[[:space:]]*,/,/g' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
             fi
-          
             gzip -9 -c "$file" > "$file.gz"
           }
-          
           find . -name "*.geojson" -type f -not -path "./node_modules/*" -not -path "./.git/*" | while read -r file; do
             compress_file "$file"
           done
 
-      - name: Commit compressed files
+      - name: Commit compressed GeoJSON files
         run: |
           git config user.name thebamboogrove
           git config user.email 127660177+thebamboogrove@users.noreply.github.com
-          git add "*.geojson.gz"
-          
+
+          git add .
           if ! git diff --staged --quiet; then
-            git commit -am "Auto-compress GeoJSON ${{ github.sha }}"
-            git push --force -u origin master:gh-pages
+            git commit -m "Auto-compress GeoJSON ${{ github.sha }}"
+            git push origin master
           else
             echo "No changes to commit"
           fi
+
+      - name: Deploy to gh-pages
+        run: |
+          # Store current files
+          git add .
+          git stash push -m "Current workflow changes"
+
+          # Get or create gh-pages
+          git fetch origin
+          if git checkout gh-pages 2>/dev/null; then
+            echo "Checked out existing gh-pages"
+          else
+            git checkout --orphan gh-pages
+            git rm -rf . 2>/dev/null || true
+            echo "Created new gh-pages branch"
+          fi
+
+          # Apply our changes (this overwrites conflicting files)
+          git checkout stash@{0} -- . 2>/dev/null || git checkout master -- .
+
+          # Commit and push
+          git add .
+          git commit -m "Deploy GeoJSON compression ${{ github.sha }}" || echo "No changes to commit"
+          git push origin gh-pages

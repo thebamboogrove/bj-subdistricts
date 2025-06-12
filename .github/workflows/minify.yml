@@ -29,7 +29,7 @@ jobs:
       - run: csso ./src/css/style.css -o ./src/css/style.css
       - run: for i in ./src/js/*.js; do terser $i --compress -o $i; done
 
-      - name: Commit minfied files
+      - name: Commit minified files
         run: |
           git config user.name thebamboogrove
           git config user.email 127660177+thebamboogrove@users.noreply.github.com
@@ -44,11 +44,20 @@ jobs:
 
       - name: Deploy to gh-pages
         run: |
-          git fetch origin gh-pages:gh-pages || true
-          git checkout gh-pages || git checkout --orphan gh-pages
-          git merge origin/master --no-edit --allow-unrelated-histories -X theirs || {
-            echo "Merge conflicts detected, resolving automatically..."
-            git add .
-            git commit -m "Resolve merge conflicts - deploy ${{ github.sha }}"
-          }
+          git add .
+          git stash push -m "Current workflow changes"
+
+          git fetch origin
+          if git checkout gh-pages 2>/dev/null; then
+            echo "Checked out existing gh-pages"
+          else
+            git checkout --orphan gh-pages
+            git rm -rf . 2>/dev/null || true
+            echo "Created new gh-pages branch"
+          fi
+
+          git checkout stash@{0} -- . 2>/dev/null || git checkout master -- .
+
+          git add .
+          git commit -m "Deploy minify ${{ github.sha }}" || echo "No changes to commit"
           git push origin gh-pages

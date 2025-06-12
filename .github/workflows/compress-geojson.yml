@@ -38,7 +38,7 @@ jobs:
         run: |
           git config user.name thebamboogrove
           git config user.email 127660177+thebamboogrove@users.noreply.github.com
-          
+
           git add .
           if ! git diff --staged --quiet; then
             git commit -m "Auto-compress GeoJSON ${{ github.sha }}"
@@ -49,11 +49,24 @@ jobs:
 
       - name: Deploy to gh-pages
         run: |
-          git fetch origin gh-pages:gh-pages || true
-          git checkout gh-pages || git checkout --orphan gh-pages
-          git merge origin/master --no-edit --allow-unrelated-histories -X theirs || {
-            echo "Merge conflicts detected, resolving automatically..."
-            git add .
-            git commit -m "Resolve merge conflicts - deploy ${{ github.sha }}"
-          }
+          # Store current files
+          git add .
+          git stash push -m "Current workflow changes"
+
+          # Get or create gh-pages
+          git fetch origin
+          if git checkout gh-pages 2>/dev/null; then
+            echo "Checked out existing gh-pages"
+          else
+            git checkout --orphan gh-pages
+            git rm -rf . 2>/dev/null || true
+            echo "Created new gh-pages branch"
+          fi
+
+          # Apply our changes (this overwrites conflicting files)
+          git checkout stash@{0} -- . 2>/dev/null || git checkout master -- .
+
+          # Commit and push
+          git add .
+          git commit -m "Deploy GeoJSON compression ${{ github.sha }}" || echo "No changes to commit"
           git push origin gh-pages

@@ -1,9 +1,14 @@
 name: minify.yml
 run-name: Minify HTML, CSS, and JS files (push -> gh-pages)
 on:
+  workflow_dispatch:
   push:
     branches:
       - 'master'
+    paths:
+      - '**/*.html'
+      - '**/*.css'
+      - '**/*.js'
 
 jobs:
   minify:

@@ -29,18 +29,26 @@ jobs:
       - run: csso ./src/css/style.css -o ./src/css/style.css
       - run: for i in ./src/js/*.js; do terser $i --compress -o $i; done
 
-      - name: Commit compressed files
+      - name: Commit minfied files
         run: |
           git config user.name thebamboogrove
           git config user.email 127660177+thebamboogrove@users.noreply.github.com
-          
+
           git add .
           if ! git diff --staged --quiet; then
-            git commit -m "Auto-compress files ${{ github.sha }}"
-            git fetch origin gh-pages:gh-pages || true
-            git checkout gh-pages || git checkout --orphan gh-pages
-            git merge origin/master --no-edit
-            git push origin gh-pages
+            git commit -m "Auto-minify files ${{ github.sha }}"
+            git push origin master
           else
             echo "No changes to commit"
           fi
+
+      - name: Deploy to gh-pages
+        run: |
+          git fetch origin gh-pages:gh-pages || true
+          git checkout gh-pages || git checkout --orphan gh-pages
+          git merge origin/master --no-edit --allow-unrelated-histories -X theirs || {
+            echo "Merge conflicts detected, resolving automatically..."
+            git add .
+            git commit -m "Resolve merge conflicts - deploy ${{ github.sha }}"
+          }
+          git push origin gh-pages

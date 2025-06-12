@@ -1,6 +1,7 @@
-name: Compress GeoJSON Files
+name: compress-geojson.yml
+run-name: Compress GeoJSON Files
 on:
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
   push:
     paths:
       - '**/*.geojson'
@@ -13,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.2.2
+        with:
+          fetch-depth: 0
+
       - name: Compress GeoJSON files
         run: |
           #!/bin/bash
@@ -38,10 +42,18 @@ jobs:
           git add .
           if ! git diff --staged --quiet; then
             git commit -m "Auto-compress GeoJSON ${{ github.sha }}"
-            git fetch origin gh-pages:gh-pages || true
-            git checkout gh-pages || git checkout --orphan gh-pages
-            git merge origin/master --no-edit
-            git push origin gh-pages
+            git push origin master
           else
             echo "No changes to commit"
           fi
+
+      - name: Deploy to gh-pages
+        run: |
+          git fetch origin gh-pages:gh-pages || true
+          git checkout gh-pages || git checkout --orphan gh-pages
+          git merge origin/master --no-edit --allow-unrelated-histories -X theirs || {
+            echo "Merge conflicts detected, resolving automatically..."
+            git add .
+            git commit -m "Resolve merge conflicts - deploy ${{ github.sha }}"
+          }
+          git push origin gh-pages

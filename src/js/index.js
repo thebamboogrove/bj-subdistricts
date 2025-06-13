@@ -4,7 +4,7 @@
 class GeoJSONCache {
     constructor() {
         this.dbName = 'GeoJSONCache';
-        this.version = 103;
+        this.version = 104;
         this.storeName = 'geojson';
         this.db = null;
         this.compressionSupported = typeof CompressionStream !== 'undefined';

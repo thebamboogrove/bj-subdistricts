@@ -245,7 +245,6 @@ class FeatureHighlighter {
         });
 
         this.currentHighlight = id;
-
         // TODO: Instead of clear w/ timeout use smoother animation?
         setTimeout(() => this.clear(), 3000);
     }
@@ -273,10 +272,18 @@ class MapApp {
         this.fuse = null;
         this.compressionSupported = this.checkCompressionSupport();
 
-        // Initialize marking system
         this.markingCache = null;
         this.markingManager = null;
         this.markingControl = null;
+
+        this.loadingState = {
+            districts: false,
+            subdistricts: false,
+            specialLayers: false,
+            labels: false,
+            search: false,
+            marking: false
+        }
     }
 
     checkCompressionSupport() {
@@ -287,41 +294,50 @@ class MapApp {
     }
 
     async fetchJSON(url, options = {}) {
-        const { enableCompression = true } = options;
-        const fetchCompression = enableCompression &&
-            (url.includes('.geojson') || url.includes('/boundaries/'));
-        let data = await this.cache.get(url);
-        if (!data) {
-            if (fetchCompression && this.compressionSupported) {
-                try {
-                    const gzipUrl = url + '.gz';
-                    const response = await fetch(gzipUrl);
-                    if (response.ok) {
-                        const stream = response.body.pipeThrough(new DecompressionStream('gzip'));
-                        const decompressedResponse = new Response(stream);
-                        data = await decompressedResponse.json();
+        const {enableCompression = true, retries = 3} = options;
+
+        for (let attempt = 1; attempt <= retries; attempt++) {
+            try {
+                let data = await this.cache.get(url);
+                if (data) return data;
+
+                if (enableCompression && this.compressionSupported &&
+                    (url.includes('.geojson') || url.includes('/boundaries/'))) {
+
+                    try {
+                        const gzipUrl = url + '.gz';
+                        const response = await fetch(gzipUrl);
+                        if (response.ok) {
+                            const stream = response.body.pipeThrough(new DecompressionStream('gzip'));
+                            const decompressedResponse = new Response(stream);
+                            data = await decompressedResponse.json();
+                        }
+                    } catch (error) {
+                        console.log(`Compressed fetch failed for ${url}, attempt ${attempt}:`, error);
                     }
-                } catch (error) {
-                    console.log('gz failed, trying ghpages', error);
                 }
-            }
-            if (fetchCompression && !data) {
-                try {
-                    const response = await fetch(url + '.gz');
-                    if (response.ok) {
-                        data = await response.json();
+
+                if (!data) {
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
-                } catch (error) {
-                    console.log('gz ghpages, fallback to decompressed', error);
+                    data = await response.json();
                 }
+
+                await this.cache.set(url, data);
+                return data;
+
+            } catch (error) {
+                console.error(`Fetch attempt ${attempt} failed for ${url}:`, error);
+
+                if (attempt === retries) {
+                    throw new Error(`Failed to fetch ${url} after ${retries} attempts: ${error.message}`);
+                }
+
+                await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
             }
-            if (!data) {
-                const response = await fetch(url);
-                data = await response.json();
-            }
-            await this.cache.set(url, data);
         }
-        return data;
     }
 
     async init() {
@@ -329,8 +345,12 @@ class MapApp {
             this.loader.setTotal(8); // map, districts, subdistricts, special, labels, search, marking, complete
 
             // index+map schema
-            this.config = await this.fetchJSON('./src/boundaries/index.json', { enableCompression: false });
-            const style = await this.fetchJSON('./src/schema/basic_minlabel.json', { enableCompression: false });
+            const [config, style] = await Promise.all([
+                this.fetchJSON('./src/boundaries/index.json', {enableCompression: false}),
+                this.fetchJSON('./src/schema/basic_minlabel.json', {enableCompression: false})
+            ]);
+
+            this.config = config;
 
             this.map = new maplibregl.Map({
                 container: 'map',
@@ -345,10 +365,7 @@ class MapApp {
             this.loader.step('Map initializing');
 
             this.map.on('load', async () => {
-                await this.loadDistricts();
-                await this.loadSubdistricts();
-                await this.loadSpecialLayers();
-                await this.addLabels();
+                await this.loadAllLayersParallel();
                 await this.setupSearch();
                 await this.setupMarkingSystem();
                 this.setupPopups();
@@ -376,7 +393,6 @@ class MapApp {
 
     async setupMarkingSystem() {
         try {
-            // Import marking system classes
             this.loader.step('Initializing marking system');
             await import('./marking-system.js');
 
@@ -386,7 +402,6 @@ class MapApp {
 
             await this.markingManager.init();
 
-            // Ensure feature states and paint properties are applied after all layers are loaded
             this.markingManager.applyAllFeatureStates();
             this.markingManager.updatePaintProperties();
 
@@ -414,59 +429,151 @@ class MapApp {
         this.map.setMaxBounds(maxBounds);
     }
 
-    async loadDistricts() {
-        this.loader.step('Loading districts');
-        for (const file of this.config.districtOutlines || []) {
-            await this.addDistrictLayer(file);
-        }
+    async loadAllLayersParallel() {
+        try {
+            const layerOperations = [];
 
-        if (this.config.cityOutline) {
-            await this.addLayer('city-outline', this.config.cityOutline, 'cityOutline');
+            if (this.config.districtOutlines?.length) {
+                layerOperations.push({
+                    type: 'districts',
+                    operation: () => this.loadDistrictsParallel()
+                });
+            }
+
+            if (this.config.subdistrictLayers?.length) {
+                layerOperations.push({
+                    type: 'subdistricts',
+                    operation: () => this.loadSubdistrictsParallel()
+                });
+            }
+
+            if (this.config.specialLayers?.length) {
+                layerOperations.push({
+                    type: 'special',
+                    operation: () => this.loadSpecialLayersParallel()
+                });
+            }
+
+            if (this.config.cityOutline) {
+                layerOperations.push({
+                    type: 'city',
+                    operation: () => this.addLayer('city-outline', this.config.cityOutline, 'cityOutline')
+                });
+            }
+
+            await this.executeWithConcurrencyLimit(layerOperations, 3);
+
+            this.loader.step('Adding labels');
+            await this.addLabelsParallel();
+
+        } catch (error) {
+            console.error('Failed to load layers in parallel:', error);
+            throw error;
         }
     }
 
-    async loadSubdistricts() {
-        this.loader.step('Loading subdistricts');
-        for (const file of this.config.subdistrictLayers || []) {
-            await this.addSubdistrictLayer(file);
+    async executeWithConcurrencyLimit(operations, limit = 3) {
+        const results = [];
+        const executing = [];
+
+        for (const op of operations) {
+            const promise = op.operation().then(result => {
+                executing.splice(executing.indexOf(promise), 1);
+                this.loader.step(`Loading ${op.type}`);
+                return result;
+            });
+
+            results.push(promise);
+            executing.push(promise);
+
+            if (executing.length >= limit) {
+                await Promise.race(executing);
+            }
         }
+
+        return Promise.all(results);
     }
 
-    async loadSpecialLayers() {
-        this.loader.step('Loading special layers');
-        for (const special of this.config.specialLayers || []) {
-            await this.addLayer(
-                special.file.split('/').pop().replace('.geojson', ''),
-                special.file,
-                special.styleRef
-            );
+    async loadDistrictsParallel() {
+        const districtPromises = this.config.districtOutlines.map(file =>
+            this.loadAndProcessDistrictData(file)
+        );
+
+        const districtDataArray = await Promise.all(districtPromises);
+
+        for (const {name, data, file} of districtDataArray) {
+            await this.addDistrictLayerToMap(name, data, file);
         }
+
+        this.loadingState.districts = true;
     }
 
-    async addSubdistrictLayer(file) {
+    async loadAndProcessDistrictData(file) {
+        const name = file.split('/').pop().replace('.geojson', '');
+        const data = await this.fetchJSON(file);
+
+        data.features.forEach(feature => {
+            const props = feature.properties || {};
+            if (props.Name) {
+                let featureId = this.generateFeatureId(props, 100000); // offset for districts
+
+                this.searchIndex.push({
+                    name: props.Name,
+                    code: String(props.code || ''),
+                    pinyin: props.pinyin || '',
+                    type: 'district',
+                    feature,
+                    featureId,
+                    sourceId: `${name}-outline`
+                });
+            }
+        });
+
+        return {name, data, file};
+    }
+
+    async addDistrictLayerToMap(name, data, file) {
+        const id = `${name}-outline`;
+        const style = this.config.styles.districtOutline;
+
+        this.map.addSource(id, {
+            type: 'geojson',
+            data,
+            maxzoom: 12,
+            tolerance: 0.4,
+            buffer: 128
+        });
+
+        this.map.addLayer({
+            id,
+            type: style.type,
+            source: id,
+            paint: style.paint,
+            layout: style.layout || {}
+        });
+    }
+
+    async loadSubdistrictsParallel() {
+        const subdistrictPromises = this.config.subdistrictLayers.map(file =>
+            this.loadAndProcessSubdistrictData(file)
+        );
+        const subdistrictDataArray = await Promise.all(subdistrictPromises);
+        for (const {name, data} of subdistrictDataArray) {
+            await this.addSubdistrictLayerToMap(name, data);
+        }
+        this.loadingState.subdistricts = true;
+    }
+
+    async loadAndProcessSubdistrictData(file) {
         const name = file.split('/').pop().replace('.geojson', '');
         const data = await this.fetchJSON(file);
 
         data.features.forEach((feature, index) => {
             const props = feature.properties || {};
             if (props.Name) {
-                // Use code as integer featureId if possible, fallback to hash
-                let featureId;
-                if (typeof props.code === 'string' && /^\d+$/.test(props.code)) {
-                    featureId = parseInt(props.code, 10);
-                } else if (typeof props.code === 'number' && Number.isInteger(props.code)) {
-                    featureId = props.code;
-                } else {
-                    // Fallback: hash Name
-                    let hash = 0;
-                    const nameStr = props.Name || 'unknown';
-                    for (let i = 0; i < nameStr.length; i++) {
-                        hash = ((hash << 5) - hash) + nameStr.charCodeAt(i);
-                        hash |= 0;
-                    }
-                    featureId = Math.abs(hash);
-                }
+                let featureId = this.generateFeatureId(props);
                 feature.id = featureId;
+
                 this.searchIndex.push({
                     name: props.Name,
                     code: String(props.code || ''),
@@ -479,6 +586,10 @@ class MapApp {
             }
         });
 
+        return {name, data};
+    }
+
+    async addSubdistrictLayerToMap(name, data) {
         this.map.addSource(`${name}-source`, {
             type: 'geojson',
             data,
@@ -516,7 +627,7 @@ class MapApp {
                     0.8,
                     ['boolean', ['feature-state', 'unmarked'], false],
                     0.2,
-                    0.2 // Default opacity
+                    0.2
                 ]
             }
         });
@@ -529,42 +640,53 @@ class MapApp {
         });
     }
 
-    async addDistrictLayer(file) {
-        const name = file.split('/').pop().replace('.geojson', '');
-        const data = await this.fetchJSON(file);
-
-        data.features.forEach(feature => {
-            const props = feature.properties || {};
-            if (props.Name) {
-                // Use code as integer featureId if possible, fallback to hash
-                let featureId;
-                if (typeof props.code === 'string' && /^\d+$/.test(props.code)) {
-                    featureId = parseInt(props.code, 10);
-                } else if (typeof props.code === 'number' && Number.isInteger(props.code)) {
-                    featureId = props.code;
-                } else {
-                    // Fallback: hash Name
-                    let hash = 0;
-                    const nameStr = props.Name || 'unknown';
-                    for (let i = 0; i < nameStr.length; i++) {
-                        hash = ((hash << 5) - hash) + nameStr.charCodeAt(i);
-                        hash |= 0;
-                    }
-                    featureId = Math.abs(hash) + 100000; // offset for districts
-                }
-                this.searchIndex.push({
-                    name: props.Name,
-                    code: String(props.code || ''),
-                    pinyin: props.pinyin || '',
-                    type: 'district',
-                    feature,
-                    featureId,
-                    sourceId: `${name}-outline` // for districts, use outline source
-                });
-            }
+    async loadSpecialLayersParallel() {
+        const specialPromises = this.config.specialLayers.map(special => {
+            const id = special.file.split('/').pop().replace('.geojson', '');
+            return this.addLayer(id, special.file, special.styleRef);
         });
 
-        await this.addLayer(`${name}-outline`, file, 'districtOutline');
+        await Promise.all(specialPromises);
+        this.loadingState.special = true;
+    }
+
+    async addLabelsParallel() {
+        const labelPromises = [];
+        if (this.config.subdistrictLayers) {
+            labelPromises.push(
+                ...this.config.subdistrictLayers.map(file =>
+                    this.addLabelLayer(file, 'subdistrict')
+                )
+            );
+        }
+
+        if (this.config.districtOutlines) {
+            labelPromises.push(
+                ...this.config.districtOutlines.map(file =>
+                    this.addLabelLayer(file, 'district')
+                )
+            );
+        }
+
+        await Promise.all(labelPromises);
+        this.loadingState.labels = true;
+    }
+
+    generateFeatureId(props, offset = 0) {
+        if (typeof props.code === 'string' && /^\d+$/.test(props.code)) {
+            return parseInt(props.code, 10) + offset;
+        } else if (typeof props.code === 'number' && Number.isInteger(props.code)) {
+            return props.code + offset;
+        } else {
+            // really unnecessary
+            let hash = 0;
+            const nameStr = props.Name || 'unknown';
+            for (let i = 0; i < nameStr.length; i++) {
+                hash = ((hash << 5) - hash) + nameStr.charCodeAt(i);
+                hash |= 0;
+            }
+            return Math.abs(hash) + offset;
+        }
     }
 
     async addLayer(id, file, styleRef) {
@@ -579,18 +701,6 @@ class MapApp {
             paint: style.paint,
             layout: style.layout || {}
         });
-    }
-
-    async addLabels() {
-        for (const file of this.config.subdistrictLayers || []) {
-            await this.addLabelLayer(file, 'subdistrict');
-        }
-
-        for (const file of this.config.districtOutlines || []) {
-            await this.addLabelLayer(file, 'district');
-        }
-
-        this.loader.step('Adding labels');
     }
 
     async addLabelLayer(file, type) {
@@ -907,12 +1017,10 @@ class MapApp {
 
         await this.markingManager.markFeatureByName(featureName, type, marked);
 
-        // Update the control panel if it's open
         if (this.markingControl && this.markingControl.isOpen) {
             this.markingControl.updatePanel();
         }
 
-        // Close and refresh popup
         const popups = document.getElementsByClassName('maplibregl-popup');
         if (popups.length > 0) {
             popups[0].remove();
@@ -920,6 +1028,5 @@ class MapApp {
     }
 }
 
-// Make the app globally accessible for popup interactions
 window.mapApp = new MapApp();
 window.mapApp.init();

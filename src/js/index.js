@@ -347,9 +347,7 @@ class MapApp {
     }
 
     checkCompressionSupport() {
-        const hasCompressionStreams = typeof DecompressionStream !== 'undefined';
-        console.log(`Compression support: ${hasCompressionStreams ? 'Yes' : 'No'}`);
-        return hasCompressionStreams;
+        return typeof DecompressionStream !== 'undefined';
     }
 
     async fetchJSON(url, options = {}) {

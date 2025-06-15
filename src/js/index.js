@@ -70,10 +70,7 @@ class GeoJSONCache {
         }
 
         store.put({
-            url,
-            data: storeData,
-            compressed,
-            timestamp: Date.now()
+            url, data: storeData, compressed, timestamp: Date.now()
         });
     }
 
@@ -211,8 +208,7 @@ class FeatureHighlighter {
         const id = `highlight-${Date.now()}`;
         // TODO: Better highlight colors?
         const colors = {
-            district: {fill: '#ff6b35', stroke: '#ff4500'},
-            subdistrict: {fill: '#4ecdc4', stroke: '#26a69a'}
+            district: {fill: '#ff6b35', stroke: '#ff4500'}, subdistrict: {fill: '#4ecdc4', stroke: '#26a69a'}
         };
         const color = colors[type] || colors.subdistrict;
 
@@ -225,22 +221,14 @@ class FeatureHighlighter {
         });
 
         this.map.addLayer({
-            id: `${id}-fill`,
-            type: 'fill',
-            source: id,
-            paint: {
-                'fill-color': color.fill,
-                'fill-opacity': 0.6
+            id: `${id}-fill`, type: 'fill', source: id, paint: {
+                'fill-color': color.fill, 'fill-opacity': 0.6
             }
         });
 
         this.map.addLayer({
-            id: `${id}-stroke`,
-            type: 'line',
-            source: id,
-            paint: {
-                'line-color': color.stroke,
-                'line-width': 3
+            id: `${id}-stroke`, type: 'line', source: id, paint: {
+                'line-color': color.stroke, 'line-width': 3
             }
         });
 
@@ -260,6 +248,83 @@ class FeatureHighlighter {
     }
 }
 
+class SearchIndex {
+    constructor() {
+        this.items = [];
+        this.fuse = null;
+        this.isReady = false;
+        this.lastQuery = '';
+        this.lastResults = [];
+    }
+
+    addItem(item) {
+        this.items.push(item);
+        this.fuse = null;
+        this.isReady = false;
+    }
+
+    addItems(items) {
+        this.items.push(...items);
+        this.fuse = null;
+        this.isReady = false;
+    }
+
+    async initializeFuse() {
+        if (this.fuse) return;
+
+        if (typeof Fuse === 'undefined') {
+            throw new Error('Fuse.js not loaded');
+        }
+
+        this.fuse = new Fuse(this.items, {
+            keys: [{
+                name: 'name', weight: 0.6, threshold: 0.4, distance: 100
+            }, {
+                name: 'code', weight: 0.3, threshold: 0.1, distance: 10
+            }, {
+                name: 'pinyin', weight: 0.1, threshold: 0.3, distance: 50
+            }],
+            includeScore: true,
+            includeMatches: true,
+            ignoreLocation: true,
+            findAllMatches: true,
+            minMatchCharLength: 1,
+            shouldSort: true,
+            threshold: 0.4,
+            distance: 100
+        });
+
+        this.isReady = true;
+    }
+
+    search(query, limit = 10) {
+        if (!this.isReady || !this.fuse) {
+            return [];
+        }
+
+        if (query === this.lastQuery && this.lastResults.length > 0) {
+            return this.lastResults.slice(0, limit);
+        }
+
+        const isNumericQuery = /^\d+$/.test(query);
+        let results = this.fuse.search(query).slice(0, limit);
+
+        if (isNumericQuery) {
+            results = results.filter(result => {
+                const hasCodeMatch = result.matches && result.matches.some(m => m.key === 'code');
+                if (hasCodeMatch) {
+                    return result.item.code.startsWith(query);
+                }
+                return true;
+            });
+        }
+
+        this.lastQuery = query;
+        this.lastResults = results;
+        return results;
+    }
+}
+
 // map app
 class MapApp {
     constructor() {
@@ -268,8 +333,8 @@ class MapApp {
         this.map = null;
         this.config = null;
         this.highlighter = null;
-        this.searchIndex = [];
-        this.fuse = null;
+        this.searchIndex = new SearchIndex();
+        this.searchInitialized = false;
         this.compressionSupported = this.checkCompressionSupport();
 
         this.markingCache = null;
@@ -277,18 +342,12 @@ class MapApp {
         this.markingControl = null;
 
         this.loadingState = {
-            districts: false,
-            subdistricts: false,
-            specialLayers: false,
-            labels: false,
-            search: false,
-            marking: false
+            districts: false, subdistricts: false, specialLayers: false, labels: false, search: false, marking: false
         }
     }
 
     checkCompressionSupport() {
         const hasCompressionStreams = typeof DecompressionStream !== 'undefined';
-
         console.log(`Compression support: ${hasCompressionStreams ? 'Yes' : 'No'}`);
         return hasCompressionStreams;
     }
@@ -301,8 +360,7 @@ class MapApp {
                 let data = await this.cache.get(url);
                 if (data) return data;
 
-                if (enableCompression && this.compressionSupported &&
-                    (url.includes('.geojson') || url.includes('/boundaries/'))) {
+                if (enableCompression && this.compressionSupported && (url.includes('.geojson') || url.includes('/boundaries/'))) {
 
                     try {
                         const gzipUrl = url + '.gz';
@@ -345,18 +403,12 @@ class MapApp {
             this.loader.setTotal(8); // map, districts, subdistricts, special, labels, search, marking, complete
 
             // index+map schema
-            const [config, style] = await Promise.all([
-                this.fetchJSON('./src/boundaries/index.json', {enableCompression: false}),
-                this.fetchJSON('./src/schema/basic_minlabel.json', {enableCompression: false})
-            ]);
+            const [config, style] = await Promise.all([this.fetchJSON('./src/boundaries/index.json', {enableCompression: false}), this.fetchJSON('./src/schema/basic_minlabel.json', {enableCompression: false})]);
 
             this.config = config;
 
             this.map = new maplibregl.Map({
-                container: 'map',
-                style,
-                zoom: 10,
-                pitchWithRotate: false
+                container: 'map', style, zoom: 10, pitchWithRotate: false
             });
 
             this.highlighter = new FeatureHighlighter(this.map);
@@ -384,9 +436,7 @@ class MapApp {
         this.map.addControl(new maplibregl.GeolocateControl({
             positionOptions: {
                 enableHighAccuracy: true
-            },
-            trackUserLocation: true,
-            showUserHeading: true
+            }, trackUserLocation: true, showUserHeading: true
         }), 'top-left');
         this.map.addControl(new SearchControl(), 'top-right');
     }
@@ -398,14 +448,14 @@ class MapApp {
 
             this.markingCache = new MarkingCache();
             this.markingManager = new MarkingManager(this.map, this.markingCache);
-            this.markingManager.setSearchIndex(this.searchIndex);
+            this.markingManager.setSearchIndex(this.searchIndex.items);
 
             await this.markingManager.init();
 
             this.markingManager.applyAllFeatureStates();
             this.markingManager.updatePaintProperties();
 
-            this.markingControl = new MarkingControl(this.markingManager, this.searchIndex);
+            this.markingControl = new MarkingControl(this.markingManager, this.searchIndex.items);
             this.map.addControl(this.markingControl, 'top-right');
 
         } catch (error) {
@@ -422,10 +472,7 @@ class MapApp {
         const [sw, ne] = bounds;
         const lngPad = (ne[0] - sw[0]) * padding;
         const latPad = (ne[1] - sw[1]) * padding;
-        const maxBounds = [
-            [sw[0] - lngPad, sw[1] - latPad],
-            [ne[0] + lngPad, ne[1] + latPad]
-        ];
+        const maxBounds = [[sw[0] - lngPad, sw[1] - latPad], [ne[0] + lngPad, ne[1] + latPad]];
         this.map.setMaxBounds(maxBounds);
     }
 
@@ -435,29 +482,25 @@ class MapApp {
 
             if (this.config.districtOutlines?.length) {
                 layerOperations.push({
-                    type: 'districts',
-                    operation: () => this.loadDistrictsParallel()
+                    type: 'districts', operation: () => this.loadDistrictsParallel()
                 });
             }
 
             if (this.config.subdistrictLayers?.length) {
                 layerOperations.push({
-                    type: 'subdistricts',
-                    operation: () => this.loadSubdistrictsParallel()
+                    type: 'subdistricts', operation: () => this.loadSubdistrictsParallel()
                 });
             }
 
             if (this.config.specialLayers?.length) {
                 layerOperations.push({
-                    type: 'special',
-                    operation: () => this.loadSpecialLayersParallel()
+                    type: 'special', operation: () => this.loadSpecialLayersParallel()
                 });
             }
 
             if (this.config.cityOutline) {
                 layerOperations.push({
-                    type: 'city',
-                    operation: () => this.addLayer('city-outline', this.config.cityOutline, 'cityOutline')
+                    type: 'city', operation: () => this.addLayer('city-outline', this.config.cityOutline, 'cityOutline')
                 });
             }
 
@@ -495,9 +538,7 @@ class MapApp {
     }
 
     async loadDistrictsParallel() {
-        const districtPromises = this.config.districtOutlines.map(file =>
-            this.loadAndProcessDistrictData(file)
-        );
+        const districtPromises = this.config.districtOutlines.map(file => this.loadAndProcessDistrictData(file));
 
         const districtDataArray = await Promise.all(districtPromises);
 
@@ -511,13 +552,13 @@ class MapApp {
     async loadAndProcessDistrictData(file) {
         const name = file.split('/').pop().replace('.geojson', '');
         const data = await this.fetchJSON(file);
-
+        const searchItems = [];
         data.features.forEach(feature => {
             const props = feature.properties || {};
             if (props.Name) {
                 let featureId = this.generateFeatureId(props, 100000); // offset for districts
 
-                this.searchIndex.push({
+                searchItems.push({
                     name: props.Name,
                     code: String(props.code || ''),
                     pinyin: props.pinyin || '',
@@ -528,7 +569,7 @@ class MapApp {
                 });
             }
         });
-
+        this.searchIndex.addItems(searchItems);
         return {name, data, file};
     }
 
@@ -537,26 +578,16 @@ class MapApp {
         const style = this.config.styles.districtOutline;
 
         this.map.addSource(id, {
-            type: 'geojson',
-            data,
-            maxzoom: 12,
-            tolerance: 0.4,
-            buffer: 128
+            type: 'geojson', data, maxzoom: 12, tolerance: 0.4, buffer: 128
         });
 
         this.map.addLayer({
-            id,
-            type: style.type,
-            source: id,
-            paint: style.paint,
-            layout: style.layout || {}
+            id, type: style.type, source: id, paint: style.paint, layout: style.layout || {}
         });
     }
 
     async loadSubdistrictsParallel() {
-        const subdistrictPromises = this.config.subdistrictLayers.map(file =>
-            this.loadAndProcessSubdistrictData(file)
-        );
+        const subdistrictPromises = this.config.subdistrictLayers.map(file => this.loadAndProcessSubdistrictData(file));
         const subdistrictDataArray = await Promise.all(subdistrictPromises);
         for (const {name, data} of subdistrictDataArray) {
             await this.addSubdistrictLayerToMap(name, data);
@@ -567,14 +598,14 @@ class MapApp {
     async loadAndProcessSubdistrictData(file) {
         const name = file.split('/').pop().replace('.geojson', '');
         const data = await this.fetchJSON(file);
-
+        const searchItems = [];
         data.features.forEach((feature, index) => {
             const props = feature.properties || {};
             if (props.Name) {
                 let featureId = this.generateFeatureId(props);
                 feature.id = featureId;
 
-                this.searchIndex.push({
+                searchItems.push({
                     name: props.Name,
                     code: String(props.code || ''),
                     pinyin: props.pinyin || '',
@@ -585,58 +616,24 @@ class MapApp {
                 });
             }
         });
-
+        this.searchIndex.addItems(searchItems);
         return {name, data};
     }
 
     async addSubdistrictLayerToMap(name, data) {
         this.map.addSource(`${name}-source`, {
-            type: 'geojson',
-            data,
-            maxzoom: 12,
-            tolerance: 0.4,
-            buffer: 128
+            type: 'geojson', data, maxzoom: 12, tolerance: 0.4, buffer: 128
         });
 
         this.map.addLayer({
-            id: `${name}-fill`,
-            type: 'fill',
-            source: `${name}-source`,
-            paint: {
-                'fill-color': [
-                    'case',
-                    ['boolean', ['feature-state', 'marked'], false],
-                    '#1e56e4',
-                    ['boolean', ['feature-state', 'unmarked'], false],
-                    '#a34b4b',
-                    [
-                        'match',
-                        ['get', 'color_id'],
-                        1, '#e41e32',
-                        2, '#ff782a',
-                        3, '#e2cf04',
-                        4, '#98c217',
-                        5, '#3f64ce',
-                        6, '#7e2b8e',
-                        '#cccccc'
-                    ]
-                ],
-                'fill-opacity': [
-                    'case',
-                    ['boolean', ['feature-state', 'marked'], false],
-                    0.8,
-                    ['boolean', ['feature-state', 'unmarked'], false],
-                    0.2,
-                    0.2
-                ]
+            id: `${name}-fill`, type: 'fill', source: `${name}-source`, paint: {
+                'fill-color': ['case', ['boolean', ['feature-state', 'marked'], false], '#1e56e4', ['boolean', ['feature-state', 'unmarked'], false], '#a34b4b', ['match', ['get', 'color_id'], 1, '#e41e32', 2, '#ff782a', 3, '#e2cf04', 4, '#98c217', 5, '#3f64ce', 6, '#7e2b8e', '#cccccc']],
+                'fill-opacity': ['case', ['boolean', ['feature-state', 'marked'], false], 0.8, ['boolean', ['feature-state', 'unmarked'], false], 0.2, 0.2]
             }
         });
 
         this.map.addLayer({
-            id: `${name}-line`,
-            type: 'line',
-            source: `${name}-source`,
-            paint: this.config.styles.subdistrictLine.paint
+            id: `${name}-line`, type: 'line', source: `${name}-source`, paint: this.config.styles.subdistrictLine.paint
         });
     }
 
@@ -653,19 +650,11 @@ class MapApp {
     async addLabelsParallel() {
         const labelPromises = [];
         if (this.config.subdistrictLayers) {
-            labelPromises.push(
-                ...this.config.subdistrictLayers.map(file =>
-                    this.addLabelLayer(file, 'subdistrict')
-                )
-            );
+            labelPromises.push(...this.config.subdistrictLayers.map(file => this.addLabelLayer(file, 'subdistrict')));
         }
 
         if (this.config.districtOutlines) {
-            labelPromises.push(
-                ...this.config.districtOutlines.map(file =>
-                    this.addLabelLayer(file, 'district')
-                )
-            );
+            labelPromises.push(...this.config.districtOutlines.map(file => this.addLabelLayer(file, 'district')));
         }
 
         await Promise.all(labelPromises);
@@ -695,11 +684,7 @@ class MapApp {
 
         this.map.addSource(id, {type: 'geojson', data, maxzoom: 12, tolerance: 0.4, buffer: 128});
         this.map.addLayer({
-            id,
-            type: style.type,
-            source: id,
-            paint: style.paint,
-            layout: style.layout || {}
+            id, type: style.type, source: id, paint: style.paint, layout: style.layout || {}
         });
     }
 
@@ -714,11 +699,8 @@ class MapApp {
                 const labelPoint = props.labelPoint;
                 if (labelPoint && Array.isArray(labelPoint) && labelPoint.length === 2) {
                     return {
-                        type: 'Feature',
-                        properties: {Name: props.Name},
-                        geometry: {
-                            type: 'Point',
-                            coordinates: [labelPoint[1], labelPoint[0]]
+                        type: 'Feature', properties: {Name: props.Name}, geometry: {
+                            type: 'Point', coordinates: [labelPoint[1], labelPoint[0]]
                         }
                     };
                 }
@@ -795,109 +777,77 @@ class MapApp {
     }
 
     async setupSearch() {
-        // TODO: fuse.js weight adjustment
-        this.fuse = new Fuse(this.searchIndex, {
-            keys: [
-                {
-                    name: 'name',
-                    weight: 0.6,
-                    threshold: 0.4,
-                    distance: 100
-                },
-                {
-                    name: 'code',
-                    weight: 0.3,
-                    threshold: 0.1,
-                    distance: 10
-                },
-                {
-                    name: 'pinyin',
-                    weight: 0.1,
-                    threshold: 0.3,
-                    distance: 50
+        try {
+            await this.searchIndex.initializeFuse();
+
+            const searchInput = document.getElementById('search');
+            if (!searchInput) return;
+
+            const SEARCH_PLACEHOLDER = "Search boundaries...";
+
+            function expandSearch() {
+                searchInput.classList.add('expanded');
+                searchInput.setAttribute('placeholder', SEARCH_PLACEHOLDER);
+            }
+
+            function collapseSearch() {
+                searchInput.classList.remove('expanded');
+                searchInput.setAttribute('placeholder', '');
+            }
+
+            searchInput.addEventListener('focus', expandSearch);
+            searchInput.addEventListener('blur', function () {
+                if (!searchInput.value) collapseSearch();
+            });
+            searchInput.addEventListener('click', expandSearch);
+
+            collapseSearch();
+
+            const awesomplete = new Awesomplete(searchInput, {
+                minChars: 1, maxItems: 10, autoFirst: true, filter: () => true, item: (text, input) => {
+                    const data = JSON.parse(text.value);
+                    return this.createSearchItem(data.item, data.matches);
                 }
-            ],
-            includeScore: true,
-            includeMatches: true,
-            ignoreLocation: true,
-            findAllMatches: true,
-            minMatchCharLength: 1
-        });
+            });
+            let searchTimeout;
+            searchInput.addEventListener('input', (e) => {
+                const query = e.target.value.trim();
 
-        const searchInput = document.getElementById('search');
-        if (!searchInput) return;
-        const SEARCH_PLACEHOLDER = "Search boundaries...";
+                clearTimeout(searchTimeout);
 
-        function expandSearch() {
-            searchInput.classList.add('expanded');
-            searchInput.setAttribute('placeholder', SEARCH_PLACEHOLDER);
+                if (query.length === 0) {
+                    awesomplete.list = [];
+                    return;
+                }
+                searchTimeout = setTimeout(() => {
+                    const results = this.searchIndex.search(query, 10);
+
+                    awesomplete.list = results.map(result => ({
+                        label: this.formatResult(result.item), value: JSON.stringify({
+                            item: result.item, matches: result.matches || []
+                        })
+                    }));
+                }, 100);
+            });
+
+            searchInput.addEventListener('awesomplete-selectcomplete', (e) => {
+                const data = JSON.parse(e.text.value);
+                const item = data.item;
+                searchInput.value = item.name;
+
+                this.fitToFeature(item.feature);
+                this.highlighter.highlight(item.feature, item.type);
+            });
+
+            this.searchInitialized = true;
+            this.loader.step('Search ready');
+
+            console.log(`Search index found ${this.searchIndex.items.length} items`);
+
+        } catch (error) {
+            console.error('Failed to setup search:', error);
+            this.loader.step('Search unavailable');
         }
-
-        function collapseSearch() {
-            searchInput.classList.remove('expanded');
-            searchInput.setAttribute('placeholder', '');
-        }
-
-        searchInput.addEventListener('focus', expandSearch);
-        searchInput.addEventListener('blur', function () {
-            if (!searchInput.value) collapseSearch();
-        });
-        searchInput.addEventListener('click', expandSearch);
-
-        //TODO: Add a clear search button
-
-        collapseSearch();
-
-        const awesomplete = new Awesomplete(searchInput, {
-            minChars: 1,
-            maxItems: 10,
-            autoFirst: true,
-            filter: () => true,
-            item: (text, input) => {
-                const data = JSON.parse(text.value);
-                return this.createSearchItem(data.item, data.matches);
-            }
-        });
-
-        searchInput.addEventListener('input', (e) => {
-            const query = e.target.value.trim();
-
-            if (query.length === 0) {
-                awesomplete.list = [];
-                return;
-            }
-
-            const isNumericQuery = /^\d+$/.test(query);
-            let results = this.fuse.search(query).slice(0, 10);
-
-            if (isNumericQuery) {
-                results = results.filter(result => {
-                    const hasCodeMatch = result.matches && result.matches.some(m => m.key === 'code');
-                    if (hasCodeMatch) {
-                        return result.item.code.startsWith(query);
-                    }
-                    return true;
-                });
-            }
-            awesomplete.list = results.map(result => ({
-                label: this.formatResult(result.item),
-                value: JSON.stringify({
-                    item: result.item,
-                    matches: result.matches || []
-                })
-            }));
-        });
-
-        searchInput.addEventListener('awesomplete-selectcomplete', (e) => {
-            const data = JSON.parse(e.text.value);
-            const item = data.item;
-            searchInput.value = item.name;
-
-            this.fitToFeature(item.feature);
-            this.highlighter.highlight(item.feature, item.type);
-        });
-
-        this.loader.step('Initializing search');
     }
 
     formatResult(item) {
@@ -951,23 +901,16 @@ class MapApp {
         zoom = Math.min(14, Math.max(8, zoom));
         //fly me to the moon
         this.map.flyTo({
-            center: [centerLng, centerLat],
-            zoom: zoom,
-            duration: 1200,
-            essential: true,
-            // easeInOutCirc
+            center: [centerLng, centerLat], zoom: zoom, duration: 1200, essential: true, // easeInOutCirc
             easing: (x) => {
-                return x < 0.5
-                    ? (1 - Math.sqrt(1 - Math.pow(2 * x, 2))) / 2
-                    : (Math.sqrt(1 - Math.pow(-2 * x + 2, 2)) + 1) / 2;
+                return x < 0.5 ? (1 - Math.sqrt(1 - Math.pow(2 * x, 2))) / 2 : (Math.sqrt(1 - Math.pow(-2 * x + 2, 2)) + 1) / 2;
             }
         });
     }
 
     setupPopups() {
         const popup = new maplibregl.Popup({
-            closeButton: true,
-            closeOnClick: false
+            closeButton: true, closeOnClick: false
         });
 
         const subdistrictLayers = (this.config.subdistrictLayers || [])
@@ -977,12 +920,7 @@ class MapApp {
             this.map.on('click', layerId, (e) => {
                 const feature = e.features[0];
                 const name = feature.properties.Name || 'Unknown';
-
-                // Find the search item for this feature
-                const searchItem = this.searchIndex.find(item =>
-                    item.name === name && item.type === 'subdistrict'
-                );
-
+                const searchItem = this.searchIndex.items.find(item => item.name === name && item.type === 'subdistrict');
                 let markButtonHtml = '';
                 if (this.markingManager && searchItem) {
                     const isMarked = this.markingManager.isMarked(searchItem);

@@ -1,10 +1,9 @@
 // TODO: better indexDB + cleanup functionality
-// TODO: refactor everything
 // indexDB geojson cache
 class GeoJSONCache {
     constructor() {
         this.dbName = 'GeoJSONCache';
-        this.version = 104;
+        this.version = 105;
         this.storeName = 'geojson';
         this.db = null;
         this.compressionSupported = typeof CompressionStream !== 'undefined';
@@ -908,26 +907,24 @@ class MapApp {
 
     setupPopups() {
         const popup = new maplibregl.Popup({
-            closeButton: true,
-            closeOnClick: false
+            closeButton: true, closeOnClick: false
         });
-
         this.map.on('click', (e) => {
+            const clickPoint = [e.lngLat.lng, e.lngLat.lat];
             const features = this.map.queryRenderedFeatures(e.point);
-            const subdistrictFeature = features.find(f =>
-                f.source && f.source.endsWith('-source') && f.layer.id.endsWith('-fill')
-            );
+            const subdistrictFeatures = features.filter(f => f.source && f.source.endsWith('-source') && f.layer.id.endsWith('-fill'));
 
-            if (subdistrictFeature) {
-                this.handleSubdistrictClick(subdistrictFeature, e.lngLat, popup);
+            if (subdistrictFeatures.length > 0) {
+                const correctFeature = this.findCorrectFeatureForPoint(clickPoint, subdistrictFeatures);
+                if (correctFeature) {
+                    this.handleSubdistrictClick(correctFeature, e.lngLat, popup);
+                }
             }
         });
 
         this.map.on('mouseenter', (e) => {
             const features = this.map.queryRenderedFeatures(e.point);
-            const hasInteractiveFeature = features.some(f =>
-                f.source && f.source.endsWith('-source') && f.layer.id.endsWith('-fill')
-            );
+            const hasInteractiveFeature = features.some(f => f.source && f.source.endsWith('-source') && f.layer.id.endsWith('-fill'));
 
             if (hasInteractiveFeature) {
                 this.map.getCanvas().style.cursor = 'pointer';
@@ -939,11 +936,108 @@ class MapApp {
         });
     }
 
+    findCorrectFeatureForPoint(point, candidates) {
+        const exactMatches = [];
+
+        for (const candidate of candidates) {
+            const name = candidate.properties.Name;
+            const originalFeature = this.getOriginalFeatureByName(name);
+
+            if (originalFeature && this.isPointInFeature(point, originalFeature)) {
+                exactMatches.push({
+                    feature: candidate, original: originalFeature
+                });
+            }
+        }
+
+        if (exactMatches.length === 0) {
+            return candidates[0];
+        }
+
+        if (exactMatches.length === 1) {
+            return exactMatches[0].feature;
+        }
+
+        let bestMatch = exactMatches[0];
+        let smallestArea = this.calculatePolygonArea(bestMatch.original.geometry);
+
+        for (let i = 1; i < exactMatches.length; i++) {
+            const area = this.calculatePolygonArea(exactMatches[i].original.geometry);
+            if (area < smallestArea) {
+                smallestArea = area;
+                bestMatch = exactMatches[i];
+            }
+        }
+        return bestMatch.feature;
+    }
+
+    getOriginalFeatureByName(name) {
+        const searchItem = this.searchIndex.items.find(item => item.name === name && item.type === 'subdistrict');
+        return searchItem ? searchItem.feature : null;
+    }
+
+    isPointInFeature(point, feature) {
+        const geometry = feature.geometry;
+
+        if (geometry.type === 'Polygon') {
+            return this.isPointInPolygon(point, geometry.coordinates);
+        } else if (geometry.type === 'MultiPolygon') {
+            return geometry.coordinates.some(polygon => this.isPointInPolygon(point, polygon));
+        }
+        return false;
+    }
+
+    isPointInPolygon(point, coordinates) {
+        const [x, y] = point;
+        const exteriorRing = coordinates[0];
+        let inside = this.pointInRing(x, y, exteriorRing);
+
+        if (!inside) return false;
+
+        for (let i = 1; i < coordinates.length; i++) {
+            const hole = coordinates[i];
+            if (this.pointInRing(x, y, hole)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    pointInRing(x, y, ring) {
+        let inside = false;
+
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            const xi = ring[i][0], yi = ring[i][1];
+            const xj = ring[j][0], yj = ring[j][1];
+
+            if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+                inside = !inside;
+            }
+        }
+
+        return inside;
+    }
+
+    calculatePolygonArea(geometry) {
+        if (geometry.type === 'Polygon') {
+            return this.ringArea(geometry.coordinates[0]);
+        } else if (geometry.type === 'MultiPolygon') {
+            return geometry.coordinates.reduce((total, polygon) => total + this.ringArea(polygon[0]), 0);
+        }
+        return 0;
+    }
+
+    ringArea(ring) {
+        let area = 0;
+        for (let i = 0; i < ring.length - 1; i++) {
+            area += (ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1]);
+        }
+        return Math.abs(area) / 2;
+    }
+
     handleSubdistrictClick(feature, lngLat, popup) {
         const name = feature.properties.Name || 'Unknown';
-        const searchItem = this.searchIndex.items.find(item =>
-            item.name === name && item.type === 'subdistrict'
-        );
+        const searchItem = this.searchIndex.items.find(item => item.name === name && item.type === 'subdistrict');
 
         let markButtonHtml = '';
         if (this.markingManager && searchItem) {

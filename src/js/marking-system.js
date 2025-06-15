@@ -273,7 +273,7 @@ class MarkingManager {
     }
 
     async markFeatureByName(featureName, type, marked = true) {
-        const searchItem = window.mapApp.searchIndex.find(item =>
+        const searchItem = window.mapApp.searchIndex.items.find(item =>
             item.name === featureName && item.type === type
         );
 

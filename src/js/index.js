@@ -908,44 +908,60 @@ class MapApp {
 
     setupPopups() {
         const popup = new maplibregl.Popup({
-            closeButton: true, closeOnClick: false
+            closeButton: true,
+            closeOnClick: false
         });
 
-        const subdistrictLayers = (this.config.subdistrictLayers || [])
-            .map(file => file.split('/').pop().replace('.geojson', '') + '-fill');
+        this.map.on('click', (e) => {
+            const features = this.map.queryRenderedFeatures(e.point);
+            const subdistrictFeature = features.find(f =>
+                f.source && f.source.endsWith('-source') && f.layer.id.endsWith('-fill')
+            );
 
-        subdistrictLayers.forEach(layerId => {
-            this.map.on('click', layerId, (e) => {
-                const feature = e.features[0];
-                const name = feature.properties.Name || 'Unknown';
-                const searchItem = this.searchIndex.items.find(item => item.name === name && item.type === 'subdistrict');
-                let markButtonHtml = '';
-                if (this.markingManager && searchItem) {
-                    const isMarked = this.markingManager.isMarked(searchItem);
-                    markButtonHtml = `
-                    <button class="popup-mark-btn ${isMarked ? 'marked' : ''}" 
-                            onclick="window.mapApp.toggleFeatureMarking('${name}', 'subdistrict', ${!isMarked})">
-                        ${isMarked ? 'Unmark' : 'Mark'} Sub-district
-                    </button>
-                `;
-                }
+            if (subdistrictFeature) {
+                this.handleSubdistrictClick(subdistrictFeature, e.lngLat, popup);
+            }
+        });
 
-                popup.setLngLat(e.lngLat)
-                    .setHTML(`
-                    <div style="font-weight: 500;">${name}</div>
-                    ${markButtonHtml}
-                `)
-                    .addTo(this.map);
-            });
+        this.map.on('mouseenter', (e) => {
+            const features = this.map.queryRenderedFeatures(e.point);
+            const hasInteractiveFeature = features.some(f =>
+                f.source && f.source.endsWith('-source') && f.layer.id.endsWith('-fill')
+            );
 
-            this.map.on('mouseenter', layerId, () => {
+            if (hasInteractiveFeature) {
                 this.map.getCanvas().style.cursor = 'pointer';
-            });
-
-            this.map.on('mouseleave', layerId, () => {
-                this.map.getCanvas().style.cursor = '';
-            });
+            }
         });
+
+        this.map.on('mouseleave', () => {
+            this.map.getCanvas().style.cursor = '';
+        });
+    }
+
+    handleSubdistrictClick(feature, lngLat, popup) {
+        const name = feature.properties.Name || 'Unknown';
+        const searchItem = this.searchIndex.items.find(item =>
+            item.name === name && item.type === 'subdistrict'
+        );
+
+        let markButtonHtml = '';
+        if (this.markingManager && searchItem) {
+            const isMarked = this.markingManager.isMarked(searchItem);
+            markButtonHtml = `
+            <button class="popup-mark-btn ${isMarked ? 'marked' : ''}" 
+                    onclick="window.mapApp.toggleFeatureMarking('${name}', 'subdistrict', ${!isMarked})">
+                ${isMarked ? 'Unmark' : 'Mark'} Sub-district
+            </button>
+        `;
+        }
+
+        popup.setLngLat(lngLat)
+            .setHTML(`
+            <div style="font-weight: 500;">${name}</div>
+            ${markButtonHtml}
+        `)
+            .addTo(this.map);
     }
 
     async toggleFeatureMarking(featureName, type, marked) {

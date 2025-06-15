@@ -867,38 +867,12 @@ class MapApp {
 
         if (coords.length === 0) return;
 
-        let minLng = coords[0][0], minLat = coords[0][1];
-        let maxLng = coords[0][0], maxLat = coords[0][1];
+        const bounds = coords.reduce((bounds, coord) => {
+            return bounds.extend(coord);
+        }, new maplibregl.LngLatBounds(coords[0], coords[0]));
 
-        coords.forEach(([lng, lat]) => {
-            if (lng < minLng) minLng = lng;
-            if (lng > maxLng) maxLng = lng;
-            if (lat < minLat) minLat = lat;
-            if (lat > maxLat) maxLat = lat;
-        });
-
-        const centerLng = (minLng + maxLng) / 2;
-        const centerLat = (minLat + maxLat) / 2;
-
-        const lngDiff = maxLng - minLng;
-        const latDiff = maxLat - minLat;
-
-        const mapContainer = this.map.getContainer();
-        const containerWidth = mapContainer.offsetWidth;
-        const containerHeight = mapContainer.offsetHeight;
-
-        const padding = 100;
-        const availableWidth = containerWidth - (padding * 2);
-        const availableHeight = containerHeight - (padding * 2);
-
-        const lngZoom = Math.log2(360 * availableWidth / (lngDiff * 256));
-        const latZoom = Math.log2(180 * availableHeight / (latDiff * 256));
-
-        let zoom = Math.min(lngZoom, latZoom);
-        zoom = Math.min(14, Math.max(8, zoom));
-        //fly me to the moon
-        this.map.flyTo({
-            center: [centerLng, centerLat], zoom: zoom, duration: 1200, essential: true, // easeInOutCirc
+        this.map.fitBounds(bounds, {
+            padding: 100, duration: 1200, essential: true, maxZoom: 14, // easeInOutCirc easing function
             easing: (x) => {
                 return x < 0.5 ? (1 - Math.sqrt(1 - Math.pow(2 * x, 2))) / 2 : (Math.sqrt(1 - Math.pow(-2 * x + 2, 2)) + 1) / 2;
             }
